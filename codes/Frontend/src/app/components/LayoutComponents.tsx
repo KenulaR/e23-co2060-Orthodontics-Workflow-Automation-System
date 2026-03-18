@@ -109,17 +109,14 @@ export function Sidebar({
       >
         <div className={cn('flex items-center', collapsed ? 'justify-center' : 'gap-3')}>
           {!collapsed && (
-            <div className="group min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm transition-all duration-200 hover:border-blue-200 hover:shadow-md">
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-1.5 shrink-0 rounded-full bg-gradient-to-b from-blue-700 via-blue-500 to-cyan-400 transition-transform duration-200 group-hover:scale-y-110" />
-                <div className="min-w-0 flex-1">
-                  <h1
-                    className="truncate text-[1.05rem] font-black tracking-tight text-slate-900 transition-colors duration-200 group-hover:text-blue-800"
-                    title="OrthoFlow"
-                  >
-                    OrthoFlow
-                  </h1>
-                </div>
+            <div className="group flex w-fit max-w-[calc(100%-3.75rem)] items-center justify-center rounded-[1.75rem] border border-slate-200 bg-white px-6 py-4 shadow-[0_14px_32px_-26px_rgba(15,23,42,0.35)] transition-all duration-200 hover:border-sky-200 hover:shadow-[0_16px_34px_-26px_rgba(14,116,214,0.22)]">
+              <div className="min-w-0 text-center">
+                <h1
+                  className="whitespace-nowrap text-[1.15rem] font-black tracking-tight text-slate-900 transition-colors duration-200 group-hover:text-slate-950"
+                  title="OrthoFlow"
+                >
+                  OrthoFlow
+                </h1>
               </div>
             </div>
           )}
@@ -129,10 +126,9 @@ export function Sidebar({
               onClick={onToggle}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl border border-blue-500 bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 text-white shadow-[0_10px_24px_-12px_rgba(37,99,235,0.75)] transition-all duration-200 hover:-translate-y-0.5 hover:from-blue-500 hover:via-blue-600 hover:to-cyan-500 hover:shadow-[0_14px_28px_-14px_rgba(6,182,212,0.75)] focus:ring-blue-500"
+              className="h-12 w-12 shrink-0 rounded-[1.4rem] border border-slate-200 bg-white text-sky-600 shadow-[0_14px_28px_-24px_rgba(15,23,42,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 hover:shadow-[0_16px_30px_-24px_rgba(14,116,214,0.24)] focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
             >
-              <span className="pointer-events-none absolute inset-x-1 top-1 h-1/2 rounded-full bg-white/18 blur-md" />
-              <span className="relative text-[1.1rem] font-semibold leading-none">
+              <span className="text-[1.2rem] font-semibold leading-none">
                 {collapsed ? '›' : '‹'}
               </span>
             </Button>
@@ -205,23 +201,22 @@ export function Sidebar({
 }
 
 export function Topbar() {
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
 
   return (
     <header className="h-16 border-b border-gray-100 bg-white px-6 flex items-center justify-between sticky top-0 z-30">
-      <div className="flex items-center gap-4">
-        <span className="text-sm text-gray-500 font-medium">Orthodontics Workflow System</span>
-        <div className="h-4 w-px bg-gray-200" />
-        <span className="text-sm font-semibold text-gray-900">University Dental Hospital</span>
+      <div className="flex items-center">
+        <span className="text-sm font-semibold tracking-wide text-slate-500">Dashboard</span>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="flex flex-col items-end">
-           <span className="text-sm font-medium text-gray-900">{user?.name}</span>
-           <span className="text-xs text-gray-500">{formatUnderscoreLabel(user?.role)}</span>
-        </div>
-        <Button variant="ghost" size="icon" onClick={logout} className="p-2 rounded-full hover:bg-red-50 text-gray-500 hover:text-red-600 transition-colors">
-          <LogOut className="w-5 h-5" />
+      <div className="flex items-center">
+        <Button
+          type="button"
+          onClick={logout}
+          className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-red-100 px-4 py-2 text-sm font-semibold text-red-600 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-red-400 hover:bg-red-200 hover:text-red-700 hover:shadow-md focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+        >
+          <LogOut className="h-4 w-4" />
+          Logout
         </Button>
       </div>
     </header>
