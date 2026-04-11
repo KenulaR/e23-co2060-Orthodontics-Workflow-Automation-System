@@ -2,6 +2,8 @@
 
 This is the shortest accurate setup path for the current repository version.
 
+Replace `/path/to/Orthodontics Workflow Automation System` below with the local path where you cloned or extracted this repository.
+
 ## 1. What This Guide Covers
 
 This guide is for bringing up the current system on a local or single-machine environment.
@@ -15,9 +17,8 @@ It assumes:
 ## 2. Backend Boot
 
 ```bash
-cd "/Users/rahulkulasooriya/Downloads/Orthodontics Workflow Automation System/Backend"
+cd "/path/to/Orthodontics Workflow Automation System/Backend"
 npm install
-cp .env.example .env
 ```
 
 Edit `Backend/.env` at minimum:
@@ -39,6 +40,11 @@ CORS_ORIGIN=http://localhost:5173
 GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
 
 EMAIL_SIMULATION=true
+
+SEED_ADMIN_NAME=System Administrator
+SEED_ADMIN_EMAIL=admin@orthoflow.edu
+SEED_ADMIN_DEPARTMENT=Orthodontics
+SEED_ADMIN_PASSWORD=
 ```
 
 Initialize and start:
@@ -52,18 +58,19 @@ npm run dev
 Important:
 
 - `npm run seed` clears and reloads core application data
+- `npm run seed` reads the initial admin identity from `SEED_ADMIN_*` values in `Backend/.env`
+- if `SEED_ADMIN_PASSWORD` is blank, the seed prints a generated temporary password and the admin must change it on first login
 - the backend should be reachable at `http://localhost:3000`
 - health check should return JSON at `http://localhost:3000/health`
 
 ## 3. Frontend Boot
 
 ```bash
-cd "/Users/rahulkulasooriya/Downloads/Orthodontics Workflow Automation System/Frontend"
+cd "/path/to/Orthodontics Workflow Automation System/Frontend"
 npm install
-cp .env.example .env
 ```
 
-Set:
+Set in `Frontend/.env`:
 
 ```env
 VITE_GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
@@ -106,9 +113,14 @@ Current helper behavior:
 
 ## 6. Login After Seeding
 
-Default seeded account:
+Seeded admin account:
 
-- `admin@orthoflow.edu` / `Jk@xditc4`
+- email comes from `SEED_ADMIN_EMAIL` or defaults to `admin@orthoflow.edu`
+- name comes from `SEED_ADMIN_NAME` or defaults to `System Administrator`
+- department comes from `SEED_ADMIN_DEPARTMENT` or defaults to `Orthodontics`
+- password comes from `SEED_ADMIN_PASSWORD`, or is generated temporarily during `npm run seed`
+
+If the password is generated, use the value printed by the seed command and change it immediately after sign-in.
 
 ## 7. Google Sign-In
 
@@ -149,7 +161,7 @@ This affects reminder emails and admin password email flows.
 For dental-chart visual PDF rendering:
 
 ```bash
-cd "/Users/rahulkulasooriya/Downloads/Orthodontics Workflow Automation System/Backend"
+cd "/path/to/Orthodontics Workflow Automation System/Backend"
 npm i playwright
 npx playwright install chromium
 ```

@@ -16,7 +16,7 @@ This document reflects the current repository state as of March 10, 2026.
 Orthodontics Workflow Automation System/
 ├── Backend/
 │   ├── server.js
-│   ├── .env.example
+│   ├── .env
 │   ├── database-schema.sql
 │   ├── scripts/
 │   │   ├── migrate.js
@@ -27,7 +27,7 @@ Orthodontics Workflow Automation System/
 │       ├── routes/
 │       └── services/
 ├── Frontend/
-│   ├── .env.example
+│   ├── .env
 │   └── src/app/
 └── start-orthoflow.sh
 ```
@@ -86,7 +86,7 @@ Role-gated navigation currently matches the shipped UI:
 Important current implementation detail:
 
 - The frontend API base URL is hardcoded to `http://localhost:3000` in `Frontend/src/app/config/api.ts`
-- The frontend only uses `.env` for `VITE_GOOGLE_CLIENT_ID`
+- The frontend uses `Frontend/.env` for `VITE_GOOGLE_CLIENT_ID`
 - For any non-localhost deployment, the frontend API base must be changed in code unless a reverse proxy preserves that backend origin
 
 ## 5. Core Implemented Domains
@@ -127,7 +127,6 @@ Notable current access behavior:
 ## 7. Required Environment Configuration
 
 Backend environment comes from `Backend/.env`.
-Use `Backend/.env.example` as the source of truth.
 
 Minimum backend values:
 
@@ -157,6 +156,11 @@ SMTP_SECURE=false
 SMTP_USER=your_email
 SMTP_PASS=your_app_password
 SMTP_FROM=your_email
+
+SEED_ADMIN_NAME=System Administrator
+SEED_ADMIN_EMAIL=admin@orthoflow.edu
+SEED_ADMIN_DEPARTMENT=Orthodontics
+SEED_ADMIN_PASSWORD=
 ```
 
 Other active backend settings supported today:
@@ -168,6 +172,13 @@ Other active backend settings supported today:
 - `RATE_LIMIT_WINDOW_MS`
 - `RATE_LIMIT_MAX_REQUESTS`
 - `LOG_LEVEL`
+
+Seed admin behavior:
+
+- `SEED_ADMIN_NAME` and `SEED_ADMIN_EMAIL` control the initial seeded admin identity
+- `SEED_ADMIN_DEPARTMENT` defaults to `Orthodontics`
+- if `SEED_ADMIN_PASSWORD` is blank, `npm run seed` generates a temporary password and forces password change on first login
+- if `SEED_ADMIN_PASSWORD` is provided, that password is used and `must_change_password` is not set by seed
 
 Frontend environment:
 
@@ -183,7 +194,6 @@ From `Backend/`:
 
 ```bash
 npm install
-cp .env.example .env
 npm run migrate
 npm run seed
 npm run dev
@@ -201,7 +211,6 @@ From `Frontend/`:
 
 ```bash
 npm install
-cp .env.example .env
 npm run dev
 ```
 
@@ -228,11 +237,18 @@ Current helper-script behavior:
 - opens the frontend in the default browser
 - stops child processes on `Ctrl+C`
 
-## 9. Seeded Local Accounts
+## 9. Seeded Local Account
 
-`Backend/scripts/seed.js` currently creates this baseline user:
+`Backend/scripts/seed.js` currently creates one baseline admin user from `Backend/.env`:
 
-- `admin@orthoflow.edu` / `Jk@xditc4`
+- email: `SEED_ADMIN_EMAIL` or `admin@orthoflow.edu`
+- name: `SEED_ADMIN_NAME` or `System Administrator`
+- department: `SEED_ADMIN_DEPARTMENT` or `Orthodontics`
+- password:
+  - `SEED_ADMIN_PASSWORD` if provided
+  - otherwise an auto-generated temporary password printed by the seed command
+
+If the password is auto-generated, the seeded admin must change it after the first login.
 
 ## 10. Google Sign-In
 
