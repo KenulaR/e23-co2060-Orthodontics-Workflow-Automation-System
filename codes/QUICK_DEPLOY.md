@@ -2,6 +2,8 @@
 
 This is the shortest accurate setup path for the current repository version.
 
+Replace `/path/to/Orthodontics Workflow Automation System` below with the local path where you cloned or extracted this repository.
+
 ## 1. What This Guide Covers
 
 This guide is for bringing up the current system on a local or single-machine environment.
@@ -15,7 +17,7 @@ It assumes:
 ## 2. Backend Boot
 
 ```bash
-cd "/Users/rahulkulasooriya/Downloads/Orthodontics Workflow Automation System/Backend"
+cd "/path/to/Orthodontics Workflow Automation System/Backend"
 npm install
 ```
 
@@ -64,7 +66,7 @@ Important:
 ## 3. Frontend Boot
 
 ```bash
-cd "/Users/rahulkulasooriya/Downloads/Orthodontics Workflow Automation System/Frontend"
+cd "/path/to/Orthodontics Workflow Automation System/Frontend"
 npm install
 ```
 
@@ -159,7 +161,7 @@ This affects reminder emails and admin password email flows.
 For dental-chart visual PDF rendering:
 
 ```bash
-cd "/Users/rahulkulasooriya/Downloads/Orthodontics Workflow Automation System/Backend"
+cd "/path/to/Orthodontics Workflow Automation System/Backend"
 npm i playwright
 npx playwright install chromium
 ```
