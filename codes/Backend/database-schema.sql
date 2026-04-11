@@ -21,12 +21,13 @@ CREATE TABLE users (
     must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
     password_changed_at TIMESTAMP NULL DEFAULT NULL,
     last_login TIMESTAMP NULL DEFAULT NULL,
+    last_activity_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL,
-    INDEX idx_patient_code (patient_code),
+    INDEX idx_role (role),
     INDEX idx_status (status),
-    INDEX idx_name (first_name, last_name),
+    INDEX idx_name (name),
     INDEX idx_email (email),
     INDEX idx_deleted_at (deleted_at)
 );
@@ -66,6 +67,8 @@ CREATE TABLE visits (
     procedure_type VARCHAR(255),
     status ENUM('SCHEDULED', 'COMPLETED', 'CANCELLED', 'DID_NOT_ATTEND') DEFAULT 'SCHEDULED',
     notes TEXT,
+    reminder_sent_at DATETIME NULL,
+    reminder_source ENUM('MANUAL', 'AUTO') NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
@@ -73,7 +76,8 @@ CREATE TABLE visits (
     INDEX idx_patient_id (patient_id),
     INDEX idx_provider_id (provider_id),
     INDEX idx_visit_date (visit_date),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_visits_reminder_window (status, reminder_sent_at, visit_date)
 );
 
 -- Patient Histories Table - Orthodontic case history records
@@ -88,6 +92,112 @@ CREATE TABLE patient_histories (
     FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE RESTRICT,
     UNIQUE KEY uniq_patient_history (patient_id),
     INDEX idx_patient_history_patient (patient_id)
+);
+
+CREATE TABLE patient_assignments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    patient_id INT NOT NULL,
+    user_id INT NOT NULL,
+    assignment_role ENUM('ORTHODONTIST', 'DENTAL_SURGEON', 'NURSE', 'STUDENT') NOT NULL,
+    assigned_by INT NOT NULL,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE RESTRICT,
+    INDEX idx_assignment_patient (patient_id),
+    INDEX idx_assignment_user (user_id),
+    INDEX idx_assignment_role (assignment_role),
+    INDEX idx_assignment_active (active),
+    UNIQUE KEY uniq_active_assignment (patient_id, user_id, assignment_role, active)
+);
+
+CREATE TABLE patient_assignment_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    patient_id INT NOT NULL,
+    target_user_id INT NOT NULL,
+    target_role ENUM('ORTHODONTIST', 'DENTAL_SURGEON') NOT NULL,
+    action_type ENUM('ASSIGN', 'REMOVE') NOT NULL,
+    requested_by INT NOT NULL,
+    status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+    reviewed_by INT NULL,
+    reviewed_at TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_par_target (target_user_id),
+    INDEX idx_par_patient (patient_id),
+    INDEX idx_par_status (status)
+);
+
+CREATE TABLE dental_chart_entries (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    patient_id INT NOT NULL,
+    tooth_number TINYINT NOT NULL,
+    status ENUM('HEALTHY', 'PATHOLOGY', 'PLANNED', 'TREATED', 'MISSING') NOT NULL DEFAULT 'HEALTHY',
+    is_pathology BOOLEAN NOT NULL DEFAULT FALSE,
+    is_planned BOOLEAN NOT NULL DEFAULT FALSE,
+    is_treated BOOLEAN NOT NULL DEFAULT FALSE,
+    is_missing BOOLEAN NOT NULL DEFAULT FALSE,
+    pathology VARCHAR(500) NULL,
+    treatment VARCHAR(500) NULL,
+    event_date DATE NULL,
+    updated_by INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE RESTRICT,
+    UNIQUE KEY uniq_patient_tooth (patient_id, tooth_number),
+    INDEX idx_dental_patient (patient_id),
+    INDEX idx_dental_status (status)
+);
+
+CREATE TABLE dental_chart_custom_entries (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    patient_id INT NOT NULL,
+    tooth_code VARCHAR(32) NOT NULL,
+    dentition ENUM('ADULT', 'MILK') NOT NULL,
+    notation_x VARCHAR(8) NOT NULL,
+    notation_y VARCHAR(8) NOT NULL,
+    status ENUM('HEALTHY', 'PATHOLOGY', 'PLANNED', 'TREATED', 'MISSING') NOT NULL DEFAULT 'HEALTHY',
+    is_pathology BOOLEAN NOT NULL DEFAULT FALSE,
+    is_planned BOOLEAN NOT NULL DEFAULT FALSE,
+    is_treated BOOLEAN NOT NULL DEFAULT FALSE,
+    is_missing BOOLEAN NOT NULL DEFAULT FALSE,
+    pathology VARCHAR(500) NULL,
+    treatment VARCHAR(500) NULL,
+    event_date DATE NULL,
+    updated_by INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE RESTRICT,
+    UNIQUE KEY uniq_patient_custom_tooth (patient_id, tooth_code),
+    INDEX idx_custom_dental_patient (patient_id),
+    INDEX idx_custom_dental_dentition (dentition),
+    INDEX idx_custom_dental_status (status)
+);
+
+CREATE TABLE dental_chart_versions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    patient_id INT NOT NULL,
+    version_label VARCHAR(255) NOT NULL,
+    snapshot_data JSON NOT NULL,
+    entry_count INT NOT NULL DEFAULT 0,
+    annotated_by INT NOT NULL,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    deleted_by INT NULL DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE,
+    FOREIGN KEY (annotated_by) REFERENCES users(id) ON DELETE RESTRICT,
+    INDEX idx_dental_chart_versions_patient (patient_id),
+    INDEX idx_dental_chart_versions_deleted_at (deleted_at),
+    INDEX idx_dental_chart_versions_created_at (created_at)
 );
 
 -- Medical Documents Table - File Uploads (Radiographs, Notes)
