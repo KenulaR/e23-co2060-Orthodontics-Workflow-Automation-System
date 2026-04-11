@@ -1,258 +1,256 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Badge, Button, Input, RefreshButton } from '../components/UI';
-import { Clock, Plus } from 'lucide-react';
-import { apiService } from '../services/api';
-import { useAuth } from '../context/AuthContext';
-
-const STATUS_FLOW = ['WAITING', 'PREPARATION', 'IN_TREATMENT', 'COMPLETED'] as const;
-
-type QueueItem = {
-  id: number;
-  patient_id: number;
-  patient_name: string;
-  patient_code: string;
-  procedure_type?: string;
-  priority: 'URGENT' | 'HIGH' | 'NORMAL' | 'LOW';
-  status: 'WAITING' | 'PREPARATION' | 'IN_TREATMENT' | 'COMPLETED';
-  arrival_time: string;
-  wait_time_minutes?: number;
-  provider_name?: string | null;
-  student_name?: string | null;
-};
-
-type PatientOption = {
-  id: number;
-  patient_code: string;
-  first_name: string;
-  last_name: string;
-};
+import React, { useState, useEffect } from 'react';
+// Note: If you have specific icon imports like from 'lucide-react', add them here!
 
 export function ClinicQueuePage() {
-  const { user } = useAuth();
-  const [items, setItems] = useState<QueueItem[]>([]);
-  const [stats, setStats] = useState<any>(null);
-  const [patients, setPatients] = useState<PatientOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ patient_id: '', procedure_type: '', priority: 'NORMAL' as QueueItem['priority'] });
-  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [queueData, setQueueData] = useState([]);
+  const [stats, setStats] = useState({ inTreatment: 0, waiting: 0, done: 0, totalToday: 0 });
+  const [isLoading, setIsLoading] = useState(true);
 
-  const canAddToQueue = ['RECEPTION', 'NURSE'].includes(user?.role || '');
-  const canUpdateQueue = ['RECEPTION', 'NURSE', 'ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(user?.role || '');
+  // Modal State
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [newPatient, setNewPatient] = useState({
+    patient_id: '',
+    student_id: '',
+    status: 'In waiting room',
+    bay: ''
+  });
 
-  const loadQueue = async () => {
-    setLoading(true);
-    setError(null);
+  const fetchClinicBoard = async () => {
     try {
-      const queueRes = await apiService.queue.getList();
-      let patientRes: any = null;
-      if (canAddToQueue) {
-        try {
-          patientRes = await apiService.patients.getList({
-            page: 1,
-            limit: 100,
-            deleted: 'active',
-            sort: 'id',
-            order: 'DESC'
-          });
-        } catch (patientErr) {
-          // Keep queue usable even if add-to-queue patient options fail to load.
-          patientRes = null;
-        }
+      const response = await fetch('http://localhost:3000/api/queue');
+      const result = await response.json();
+      
+      if (result.success) {
+        setQueueData(result.data);
+        setStats(result.stats);
       }
-
-      setItems(queueRes.data?.queue || []);
-      setStats(queueRes.data?.statistics || null);
-      setPatients(patientRes?.data?.patients || []);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load clinic queue');
-      setItems([]);
-      setStats(null);
+    } catch (error) {
+      console.error("Failed to fetch clinic board:", error);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadQueue();
+    fetchClinicBoard();
+    const interval = setInterval(fetchClinicBoard, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  const waiting = useMemo(() => items.filter((i) => i.status === 'WAITING'), [items]);
-  const active = useMemo(() => items.filter((i) => i.status !== 'WAITING' && i.status !== 'COMPLETED'), [items]);
-
-  const addToQueue = async (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.patient_id) return;
-    setAdding(true);
-    setError(null);
     try {
-      await apiService.queue.addToQueue({
-        patient_id: Number(form.patient_id),
-        priority: form.priority,
-        procedure_type: form.procedure_type || undefined
+      const response = await fetch('http://localhost:5000/api/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPatient)
       });
-      setShowAdd(false);
-      setForm({ patient_id: '', procedure_type: '', priority: 'NORMAL' });
-      await loadQueue();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to add patient to queue');
-    } finally {
-      setAdding(false);
+      
+      const result = await response.json();
+      if (result.success) {
+        setIsRegisterModalOpen(false);
+        setNewPatient({ patient_id: '', student_id: '', status: 'In waiting room', bay: '' });
+        fetchClinicBoard();
+      } else {
+        alert(result.message);
+      }
+    } catch (error) {
+      console.error("Error registering patient:", error);
     }
   };
 
-  const setNextStatus = async (item: QueueItem) => {
-    const idx = STATUS_FLOW.indexOf(item.status);
-    if (idx === -1 || idx === STATUS_FLOW.length - 1) return;
-
-    setUpdatingId(item.id);
-    setError(null);
+  const updatePatientStatus = async (queueId: number, newStatus: string) => {
     try {
-      await apiService.queue.updateStatus(String(item.id), { status: STATUS_FLOW[idx + 1] });
-      await loadQueue();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to update queue status');
-    } finally {
-      setUpdatingId(null);
+      const response = await fetch(`http://localhost:5000/api/queue/${queueId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      
+      const result = await response.json();
+      if (result.success) {
+        fetchClinicBoard();
+      }
+    } catch (error) {
+      console.error("Error updating status:", error);
     }
   };
 
-  const statusBadge = (status: QueueItem['status']) => {
-    if (status === 'WAITING') return 'warning';
-    if (status === 'COMPLETED') return 'success';
-    return 'blue';
-  };
-
-  const queueCard = (item: QueueItem) => (
-    <div key={item.id} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-      <div className="flex justify-between items-start gap-3">
-        <div>
-          <h4 className="font-bold text-gray-900">{item.patient_name}</h4>
-          <p className="text-xs text-gray-500">#{item.patient_code}</p>
-          <p className="text-xs text-gray-500 mt-1">{item.procedure_type || 'General visit'}</p>
-        </div>
-        <Badge variant={statusBadge(item.status) as any}>{item.status}</Badge>
-      </div>
-      <div className="mt-3 text-xs text-gray-600 space-y-1">
-        <p>Priority: {item.priority}</p>
-        <p>Provider: {item.provider_name || 'Unassigned'}</p>
-        <p>Student: {item.student_name || 'Unassigned'}</p>
-        <p>Wait: {item.wait_time_minutes ?? '-'} min</p>
-      </div>
-      <div className="mt-4 flex gap-2">
-        {canUpdateQueue && item.status !== 'COMPLETED' && (
-          <Button
-            size="sm"
-            onClick={() => setNextStatus(item)}
-            disabled={updatingId === item.id}
-            className="flex-1"
-          >
-            Next Status
-          </Button>
-        )}
-      </div>
-    </div>
-  );
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-64">Loading Clinic Live...</div>;
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Live Clinic Queue</h2>
-          <p className="text-gray-500">Real-time queue integrated with backend records.</p>
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">Clinic Queue</h1>
+        <p className="text-slate-500">Hospital Management System • {new Date().toLocaleDateString()}</p>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-3xl font-bold text-slate-800">{stats.inTreatment}</h3>
+            <p className="text-slate-500 font-medium">In Treatment</p>
         </div>
-        <div className="flex gap-2">
-          <RefreshButton onClick={loadQueue} loading={loading} />
-          {canAddToQueue && (
-            <Button className="flex items-center gap-2" onClick={() => setShowAdd((v) => !v)}>
-              <Plus className="w-4 h-4" />
-              Add to Queue
-            </Button>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-3xl font-bold text-slate-800">{stats.waiting}</h3>
+            <p className="text-slate-500 font-medium">Waiting</p>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-3xl font-bold text-slate-800">{stats.done}</h3>
+            <p className="text-slate-500 font-medium">Done</p>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-3xl font-bold text-slate-800">{stats.totalToday}</h3>
+            <p className="text-slate-500 font-medium">Total Today</p>
+        </div>
+      </div>
+
+      {/* Queue List */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+          <h2 className="text-lg font-bold text-slate-800">Live Clinic Queue</h2>
+          <button 
+            onClick={() => setIsRegisterModalOpen(true)}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          >
+            + Register Patient
+          </button>
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {queueData.map((item: any) => (
+            <div key={item.queue_id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 hover:bg-slate-50 transition-colors">
+              <div className="flex items-center gap-4 mb-4 sm:mb-0">
+                <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-lg shrink-0">
+                  {item.patient_name.charAt(0)}
+                </div>
+                
+                <div>
+                  <h4 className="font-bold text-slate-800 text-lg">{item.patient_name}</h4>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500 mt-1">
+                    <span>{new Date(item.arrival_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    {item.student_name && (
+                      <>
+                        <span>•</span>
+                        <span>Student: {item.student_name}</span>
+                      </>
+                    )}
+                    {item.bay && (
+                      <>
+                        <span>•</span>
+                        <span>Bay: {item.bay}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <select 
+                value={item.status}
+                onChange={(e) => updatePatientStatus(item.queue_id, e.target.value)}
+                className={`border-none rounded-full px-4 py-2 text-sm font-semibold cursor-pointer outline-none ring-1 ring-inset 
+                  ${item.status === 'In waiting room' ? 'bg-yellow-50 text-yellow-700 ring-yellow-200' : ''}
+                  ${item.status === 'under consultation' ? 'bg-purple-50 text-purple-700 ring-purple-200' : ''}
+                  ${item.status === 'under treatment' ? 'bg-blue-50 text-blue-700 ring-blue-200' : ''}
+                  ${item.status === 'Treatments are done / Done' ? 'bg-green-50 text-green-700 ring-green-200' : ''}
+                `}
+              >
+                <option value="In waiting room">In waiting room</option>
+                <option value="under consultation">under consultation</option>
+                <option value="under treatment">under treatment</option>
+                <option value="Treatments are done / Done">Treatments are done / Done</option>
+              </select>
+            </div>
+          ))}
+          
+          {queueData.length === 0 && (
+            <div className="p-8 text-center text-slate-500">
+              No patients currently in the queue.
+            </div>
           )}
         </div>
       </div>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-
-      {showAdd && canAddToQueue && (
-        <Card className="p-4">
-          <form className="grid grid-cols-1 md:grid-cols-4 gap-3" onSubmit={addToQueue}>
-            <select
-              className="h-10 rounded-md border border-gray-200 px-3 text-sm"
-              value={form.patient_id}
-              onChange={(e) => setForm((f) => ({ ...f, patient_id: e.target.value }))}
-              required
-            >
-              <option value="">Select patient</option>
-              {patients.map((p) => (
-                <option key={p.id} value={p.id}>{p.first_name} {p.last_name} (#{p.patient_code})</option>
-              ))}
-            </select>
-            <Input
-              placeholder="Procedure type"
-              value={form.procedure_type}
-              onChange={(e) => setForm((f) => ({ ...f, procedure_type: e.target.value }))}
-            />
-            <select
-              className="h-10 rounded-md border border-gray-200 px-3 text-sm"
-              value={form.priority}
-              onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as QueueItem['priority'] }))}
-            >
-              <option value="LOW">LOW</option>
-              <option value="NORMAL">NORMAL</option>
-              <option value="HIGH">HIGH</option>
-              <option value="URGENT">URGENT</option>
-            </select>
-            <Button type="submit" disabled={adding}>{adding ? 'Adding...' : 'Add'}</Button>
-          </form>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="p-4 border-t-4 border-t-amber-400">
-          <h3 className="font-bold flex items-center gap-2 mb-4">
-            Waiting Area
-            <Badge variant="warning">{waiting.length}</Badge>
-          </h3>
-          <div className="space-y-3">{waiting.map(queueCard)}</div>
-        </Card>
-
-        <Card className="p-4 border-t-4 border-t-blue-500 lg:col-span-1">
-          <h3 className="font-bold flex items-center gap-2 mb-4">
-            Active Treatment
-            <Badge variant="blue">{active.length}</Badge>
-          </h3>
-          <div className="space-y-3">{active.map(queueCard)}</div>
-        </Card>
-
-        <Card className="p-4 bg-gray-50/50">
-          <h3 className="font-bold mb-4">Daily Statistics</h3>
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between p-2 bg-white rounded border border-gray-100">
-              <span>Total in queue</span>
-              <span className="font-bold">{stats?.total_in_queue ?? 0}</span>
+      {/* Registration Modal Overlay */}
+      {isRegisterModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-slate-800">Register Patient to Queue</h2>
+              <button onClick={() => setIsRegisterModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                ✕
+              </button>
             </div>
-            <div className="flex justify-between p-2 bg-white rounded border border-gray-100">
-              <span>Waiting</span>
-              <span className="font-bold">{stats?.waiting_count ?? 0}</span>
-            </div>
-            <div className="flex justify-between p-2 bg-white rounded border border-gray-100">
-              <span>In treatment</span>
-              <span className="font-bold">{stats?.in_treatment_count ?? 0}</span>
-            </div>
-            <div className="flex justify-between p-2 bg-white rounded border border-gray-100">
-              <span>Avg wait time</span>
-              <span className="font-bold">{Math.round(Number(stats?.avg_wait_time || 0))} min</span>
-            </div>
+            
+            <form onSubmit={handleRegisterSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Patient ID (Number)</label>
+                <input 
+                  type="number" 
+                  required
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={newPatient.patient_id}
+                  onChange={(e) => setNewPatient({...newPatient, patient_id: e.target.value})}
+                  placeholder="e.g. 1"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Status</label>
+                <select 
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={newPatient.status}
+                  onChange={(e) => setNewPatient({...newPatient, status: e.target.value})}
+                >
+                  <option value="In waiting room">In waiting room</option>
+                  <option value="under consultation">under consultation</option>
+                  <option value="under treatment">under treatment</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Student ID</label>
+                  <input 
+                    type="number" 
+                    className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={newPatient.student_id}
+                    onChange={(e) => setNewPatient({...newPatient, student_id: e.target.value})}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Bay</label>
+                  <input 
+                    type="text" 
+                    className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={newPatient.bay}
+                    onChange={(e) => setNewPatient({...newPatient, bay: e.target.value})}
+                    placeholder="e.g. 1A"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button 
+                  type="button"
+                  onClick={() => setIsRegisterModalOpen(false)}
+                  className="flex-1 bg-slate-100 text-slate-700 font-medium py-2 rounded-lg hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 bg-blue-600 text-white font-medium py-2 rounded-lg hover:bg-blue-700"
+                >
+                  Register
+                </button>
+              </div>
+            </form>
           </div>
-        </Card>
-      </div>
-
-      {loading && (
-        <div className="text-sm text-gray-500 flex items-center gap-2">
-          <Clock className="w-4 h-4" /> Loading queue...
         </div>
       )}
     </div>
