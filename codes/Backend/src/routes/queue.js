@@ -3,13 +3,14 @@ const express = require('express');
 const router = express.Router();
 const queueController = require('../controllers/queueController');
 
-// Fetch the main dashboard data (List + Stats)
-router.get('/', queueController.getClinicBoard);
+// ⚠️ IMPORTANT: Specific routes like '/patients' MUST go BEFORE dynamic routes like '/:id'
+router.get('/patients', queueController.getAvailablePatients); 
 
-// Add a new patient to the queue from the Modal
+// Standard routes
+router.get('/', queueController.getClinicBoard);
 router.post('/', queueController.registerPatient);
 
-// Update a patient's status
+// Dynamic routes (these catch anything with an ID, so they must go last)
 router.put('/:id/status', queueController.updateQueueStatus);
 
 module.exports = router;
