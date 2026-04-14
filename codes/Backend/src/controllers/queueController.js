@@ -24,7 +24,9 @@ const queueController = {
             `);
 
             const stats = {
-                inTreatment: queueItems.filter(item => item.status === 'under treatment' || item.status === 'under consultation').length,
+                inTreatment: queueItems.filter(item => 
+                    item.status === 'under treatment' || item.status === 'under consultation'
+                ).length,
                 waiting: queueItems.filter(item => item.status === 'In waiting room').length,
                 done: queueItems.filter(item => item.status === 'Treatments are done / Done').length,
                 totalToday: queueItems.length
@@ -37,10 +39,9 @@ const queueController = {
         }
     },
 
-    // 2. Fetch all patients for the Receptionist Dropdown
+    // 2. Fetch all patients for dropdown
     getAvailablePatients: async (req, res) => {
         try {
-            // SELECT * grabs everything, ensuring we don't miss column names
             const [patients] = await pool.query(`
                 SELECT * FROM patients ORDER BY first_name ASC
             `);
@@ -51,7 +52,7 @@ const queueController = {
         }
     },
 
-    // 3. Register a new patient to the queue
+    // 3. Register a new patient
     registerPatient: async (req, res) => {
         try {
             const { patient_id, status, student_id, bay } = req.body;
@@ -66,14 +67,18 @@ const queueController = {
                 [patient_id, status || 'In waiting room', student_id || null, bay || null]
             );
 
-            res.status(201).json({ success: true, message: 'Patient added to queue', queue_id: result.insertId });
+            res.status(201).json({ 
+                success: true, 
+                message: 'Patient added to queue', 
+                queue_id: result.insertId 
+            });
         } catch (error) {
             console.error('Error registering patient:', error);
             res.status(500).json({ success: false, message: 'Failed to register patient to queue' });
         }
     },
 
-    // 4. Update an existing status
+    // 4. Update status
     updateQueueStatus: async (req, res) => {
         try {
             const queueId = req.params.id;
@@ -88,7 +93,10 @@ const queueController = {
                 return res.status(404).json({ success: false, message: 'Queue item not found' });
             }
 
-            res.status(200).json({ success: true, message: `Status updated to ${status}` });
+            res.status(200).json({ 
+                success: true, 
+                message: `Status updated to ${status}` 
+            });
         } catch (error) {
             console.error('Error updating status:', error);
             res.status(500).json({ success: false, message: 'Failed to update status' });
