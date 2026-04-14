@@ -2,10 +2,9 @@
 const pool = require('../config/database');
 
 const queueController = {
-    // 1. Fetch the Queue AND the Stats for the top cards
+    // 1. Fetch the Queue AND the Stats
     getClinicBoard: async (req, res) => {
         try {
-            // Get the list of patients, including the Student's name and Bay
             const [queueItems] = await pool.query(`
                 SELECT 
                     q.id AS queue_id,
@@ -24,9 +23,10 @@ const queueController = {
                     q.arrival_time ASC
             `);
 
-            // Calculate the stats for your top cards
             const stats = {
-                inTreatment: queueItems.filter(item => item.status === 'under treatment').length,
+                inTreatment: queueItems.filter(item => 
+                    item.status === 'under treatment' || item.status === 'under consultation'
+                ).length,
                 waiting: queueItems.filter(item => item.status === 'In waiting room').length,
                 done: queueItems.filter(item => item.status === 'Treatments are done / Done').length,
                 totalToday: queueItems.length
@@ -39,10 +39,22 @@ const queueController = {
         }
     },
 
-    // 2. Register a new patient to the queue (from your Modal)
+    // 2. Fetch all patients for dropdown
+    getAvailablePatients: async (req, res) => {
+        try {
+            const [patients] = await pool.query(`
+                SELECT * FROM patients ORDER BY first_name ASC
+            `);
+            res.status(200).json({ success: true, data: patients });
+        } catch (error) {
+            console.error('Error fetching patients:', error);
+            res.status(500).json({ success: false, message: 'Failed to fetch patients' });
+        }
+    },
+
+    // 3. Register a new patient
     registerPatient: async (req, res) => {
         try {
-            // Note: The frontend must send the patient_id and student_id, not just the typed name string
             const { patient_id, status, student_id, bay } = req.body;
 
             if (!patient_id) {
@@ -55,14 +67,18 @@ const queueController = {
                 [patient_id, status || 'In waiting room', student_id || null, bay || null]
             );
 
-            res.status(201).json({ success: true, message: 'Patient added to queue', queue_id: result.insertId });
+            res.status(201).json({ 
+                success: true, 
+                message: 'Patient added to queue', 
+                queue_id: result.insertId 
+            });
         } catch (error) {
             console.error('Error registering patient:', error);
             res.status(500).json({ success: false, message: 'Failed to register patient to queue' });
         }
     },
 
-    // 3. Update an existing status (e.g., if reception changes them to 'Done')
+    // 4. Update status
     updateQueueStatus: async (req, res) => {
         try {
             const queueId = req.params.id;
@@ -77,7 +93,10 @@ const queueController = {
                 return res.status(404).json({ success: false, message: 'Queue item not found' });
             }
 
-            res.status(200).json({ success: true, message: `Status updated to ${status}` });
+            res.status(200).json({ 
+                success: true, 
+                message: `Status updated to ${status}` 
+            });
         } catch (error) {
             console.error('Error updating status:', error);
             res.status(500).json({ success: false, message: 'Failed to update status' });
