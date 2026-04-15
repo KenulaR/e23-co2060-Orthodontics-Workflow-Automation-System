@@ -7,7 +7,9 @@
     "start": "node server.js",
     "dev": "node server.js",
     "migrate": "node scripts/migrate.js",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "ensure-admin": "node scripts/ensure-admin.js",
+    "reset-admin-password": "node scripts/ensure-admin.js --reset-password"
   },
   "keywords": [
     "orthodontics",
