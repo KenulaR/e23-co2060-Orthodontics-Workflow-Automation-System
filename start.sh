@@ -12,6 +12,17 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+if [ -d "$SCRIPT_DIR/Backend" ]; then
+    BACKEND_DIR="$SCRIPT_DIR/Backend"
+    FRONTEND_DIR="$SCRIPT_DIR/Frontend"
+elif [ -d "$SCRIPT_DIR/codes/Backend" ]; then
+    BACKEND_DIR="$SCRIPT_DIR/codes/Backend"
+    FRONTEND_DIR="$SCRIPT_DIR/codes/Frontend"
+else
+    echo "❌ Backend folder missing"
+    exit 1
+fi
+
 # -------------------------
 # System checks
 # -------------------------
@@ -27,7 +38,7 @@ fi
 
 MYSQL_AVAILABLE=1
 if ! command -v mysql >/dev/null 2>&1; then
-    echo "⚠️ MySQL CLI not found (DB auto setup disabled)"
+    echo "⚠️ MySQL CLI not found (using Node database bootstrap instead)"
     MYSQL_AVAILABLE=0
 fi
 
@@ -38,7 +49,7 @@ echo ""
 # -------------------------
 # LOAD ENV (SAFE SIMPLE PARSER)
 # -------------------------
-ENV_FILE="$SCRIPT_DIR/Backend/.env"
+ENV_FILE="$BACKEND_DIR/.env"
 
 if [ ! -f "$ENV_FILE" ]; then
     echo "❌ Backend .env not found"
@@ -121,7 +132,7 @@ mysql_value() {
 }
 
 ensure_frontend_env() {
-    local frontend_env="$SCRIPT_DIR/Frontend/.env"
+    local frontend_env="$FRONTEND_DIR/.env"
 
     if [ ! -f "$frontend_env" ]; then
         echo "⚠️ Frontend .env not found. Creating one..."
@@ -138,74 +149,24 @@ ensure_frontend_env() {
     fi
 }
 
-# -------------------------
-# DATABASE SETUP
-# -------------------------
-setup_database() {
-    if [ "$MYSQL_AVAILABLE" -eq 0 ]; then
-        echo "⚠️ Skipping database setup because MySQL CLI is unavailable"
-        return
-    fi
-
-    echo "🗄️ Checking database..."
-
-    DB_EXISTS=$(mysql_value -e "SHOW DATABASES LIKE '$DB_NAME';" 2>/dev/null | grep "$DB_NAME" || true)
-
-    if [ -z "$DB_EXISTS" ]; then
-        echo "⚠️ Database '$DB_NAME' not found. Creating..."
-
-        mysql_cmd -e "CREATE DATABASE \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
-            echo "❌ Failed to create database (check credentials)"
-            exit 1
-        }
-
-        echo "✅ Database created"
-    else
-        echo "✅ Database exists"
-    fi
-}
-
-initialize_database_if_needed() {
-    if [ "$MYSQL_AVAILABLE" -eq 0 ]; then
-        echo "⚠️ Skipping database initialization because MySQL CLI is unavailable"
-        return
-    fi
-
-    local users_table_exists
-    users_table_exists=$(mysql_value -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '$DB_NAME' AND TABLE_NAME = 'users';" 2>/dev/null | tr -d '[:space:]' || true)
-
-    if [ "$users_table_exists" = "1" ]; then
-        echo "✅ Database schema already initialized"
-        return
-    fi
-
-    if [ "$DB_NAME" != "orthoflow" ]; then
-        echo "❌ Automatic schema initialization currently requires DB_NAME=orthoflow"
-        echo "   Update Backend/database-schema.sql before using a different DB_NAME."
-        exit 1
-    fi
-
-    echo "📦 Fresh database detected. Running migration..."
-    (cd "$SCRIPT_DIR/Backend" && npm run migrate) || {
-        echo "❌ Database migration failed"
-        exit 1
-    }
-
-    echo "✅ Database schema initialized"
-}
-
 ensure_admin_account() {
-    if [ "$MYSQL_AVAILABLE" -eq 0 ]; then
-        echo "⚠️ Skipping admin account setup because MySQL CLI is unavailable"
-        return
-    fi
-
     echo "👤 Checking admin account..."
-    (cd "$SCRIPT_DIR/Backend" && npm run ensure-admin) || {
+    (cd "$BACKEND_DIR" && npm run ensure-admin) || {
         if [ "$INTERRUPTED" -eq 1 ]; then
             exit 130
         fi
         echo "❌ Admin account setup failed"
+        exit 1
+    }
+}
+
+bootstrap_database() {
+    echo "🗄️ Checking database..."
+    (cd "$BACKEND_DIR" && npm run bootstrap-db) || {
+        if [ "$INTERRUPTED" -eq 1 ]; then
+            exit 130
+        fi
+        echo "❌ Database setup failed"
         exit 1
     }
 }
@@ -252,15 +213,14 @@ ensure_frontend_env
 echo ""
 echo "📍 Backend Setup"
 
-cd "$SCRIPT_DIR/Backend"
+cd "$BACKEND_DIR"
 
 install_if_needed
 
 # -------------------------
 # DATABASE INIT
 # -------------------------
-setup_database
-initialize_database_if_needed
+bootstrap_database
 ensure_admin_account
 
 if is_port_in_use 3000; then
@@ -287,7 +247,7 @@ echo "✅ Backend ready"
 echo ""
 echo "📍 Frontend Setup"
 
-cd "$SCRIPT_DIR/Frontend"
+cd "$FRONTEND_DIR"
 
 install_if_needed
 
