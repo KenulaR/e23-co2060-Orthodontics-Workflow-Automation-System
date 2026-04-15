@@ -14,12 +14,24 @@ Express + MySQL backend for the current Orthodontics Workflow Automation System.
 
 ## Run Locally
 
+Recommended full-system startup from the repository root:
+
 ```bash
-cd Backend
+cp codes/Backend/.env.example codes/Backend/.env
+# edit codes/Backend/.env with your local MySQL credentials and admin values
+./start.sh
+```
+
+The root `start.sh` helper installs missing dependencies, initializes the database when needed, ensures an admin account exists, starts the backend and frontend, waits for readiness, and opens the app.
+
+Manual backend-only startup:
+
+```bash
+cd codes/Backend
 npm install
 cp .env.example .env
-npm run migrate
-npm run seed
+npm run bootstrap-db
+npm run ensure-admin
 npm run dev
 ```
 
@@ -31,12 +43,15 @@ curl http://localhost:3000/health
 
 Important:
 
-- `npm run seed` clears and reloads core application tables
+- `npm run bootstrap-db` creates the configured database/schema when it is missing or empty
+- `npm run bootstrap-db` refuses to initialize a non-empty unknown database
+- `npm run ensure-admin` creates or verifies an active admin account from `SEED_ADMIN_*` values
+- `npm run seed` clears and reloads core application tables; use it only for a deliberate reset
 - `npm run dev` currently runs `node server.js`
 
 ## Environment
 
-Use `Backend/.env.example` as the source of truth.
+Use `codes/Backend/.env.example` as the source of truth.
 
 Important variables:
 
@@ -81,22 +96,36 @@ Important variables:
 ```bash
 npm run dev
 npm start
+npm run bootstrap-db
+npm run ensure-admin
+npm run reset-admin-password
 npm run migrate
 npm run seed
 ```
 
-## Seeded Local Accounts
+Script notes:
 
-Current seed script creates:
+- `bootstrap-db`: initializes a missing/empty database from `database-schema.sql` and runs runtime schema guards.
+- `ensure-admin`: creates the configured admin only when no active admin exists.
+- `reset-admin-password`: resets/promotes the configured admin and prints or emails a temporary password when needed.
+- `migrate`: applies the schema file manually.
+- `seed`: destructive reset utility that clears and reloads core application tables.
 
-- `admin@orthoflow.edu` / `Jk@xditc4`
+## Local Admin Account
+
+Admin account values come from `SEED_ADMIN_*` in `codes/Backend/.env`:
+
+- email: `SEED_ADMIN_EMAIL` or `admin@orthoflow.edu`
+- name: `SEED_ADMIN_NAME` or `System Administrator`
+- department: `SEED_ADMIN_DEPARTMENT` or `Orthodontics`
+- password: `SEED_ADMIN_PASSWORD`, or a generated temporary password printed during setup
 
 ## Notes
 
 For visual dental-chart PDF exports with Chromium:
 
 ```bash
-cd Backend
+cd codes/Backend
 npm i playwright
 npx playwright install chromium
 ```

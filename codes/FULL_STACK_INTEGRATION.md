@@ -1,6 +1,6 @@
 # OrthoFlow Full-Stack Integration Guide
 
-This document reflects the current repository state as of March 10, 2026.
+This document reflects the current repository state as of April 15, 2026.
 
 ## 1. Current Stack
 
@@ -13,28 +13,31 @@ This document reflects the current repository state as of March 10, 2026.
 ## 2. Repository Layout
 
 ```text
-Orthodontics Workflow Automation System/
-├── Backend/
-│   ├── server.js
-│   ├── .env
-│   ├── database-schema.sql
-│   ├── scripts/
-│   │   ├── migrate.js
-│   │   └── seed.js
-│   └── src/
-│       ├── controllers/
-│       ├── middleware/
-│       ├── routes/
-│       └── services/
-├── Frontend/
-│   ├── .env
-│   └── src/app/
+e23-co2060-Orthodontics-Workflow-Automation-System/
+├── codes/
+│   ├── Backend/
+│   │   ├── server.js
+│   │   ├── .env
+│   │   ├── database-schema.sql
+│   │   ├── scripts/
+│   │   │   ├── bootstrap-database.js
+│   │   │   ├── ensure-admin.js
+│   │   │   ├── migrate.js
+│   │   │   └── seed.js
+│   │   └── src/
+│   │       ├── controllers/
+│   │       ├── middleware/
+│   │       ├── routes/
+│   │       └── services/
+│   └── Frontend/
+│       ├── .env
+│       └── src/app/
 └── start.sh
 ```
 
 ## 3. Backend Integration Surface
 
-`Backend/server.js` starts the API, validates the DB connection, ensures access-control schema updates exist, and starts two background jobs:
+`codes/Backend/server.js` starts the API, validates the DB connection, ensures access-control schema updates exist, and starts two background jobs:
 
 - audit log retention cleanup
 - automatic appointment reminder processing
@@ -51,6 +54,8 @@ Current API roots:
 - `/api/inventory`
 - `/api/users`
 - `/api/reports`
+- `/api/payment-records`
+- `/api/patient-materials`
 
 Operational endpoints:
 
@@ -85,8 +90,8 @@ Role-gated navigation currently matches the shipped UI:
 
 Important current implementation detail:
 
-- The frontend API base URL is hardcoded to `http://localhost:3000` in `Frontend/src/app/config/api.ts`
-- The frontend uses `Frontend/.env` for `VITE_GOOGLE_CLIENT_ID`
+- The frontend API base URL is hardcoded to `http://localhost:3000` in `codes/Frontend/src/app/config/api.ts`
+- The frontend uses `codes/Frontend/.env` for `VITE_GOOGLE_CLIENT_ID`
 - For any non-localhost deployment, the frontend API base must be changed in code unless a reverse proxy preserves that backend origin
 
 ## 5. Core Implemented Domains
@@ -114,7 +119,7 @@ Current security behavior in the running system:
 - inactivity timeout is enforced with `SESSION_TIMEOUT_SECONDS`
 - users flagged with `must_change_password` are forced to `/settings`
 - auth routes use stricter rate limiting
-- object-level access checks are enforced through `Backend/src/middleware/accessControl.js`
+- object-level access checks are enforced through `codes/Backend/src/middleware/accessControl.js`
 
 Notable current access behavior:
 
@@ -126,7 +131,7 @@ Notable current access behavior:
 
 ## 7. Required Environment Configuration
 
-Backend environment comes from `Backend/.env`.
+Backend environment comes from `codes/Backend/.env`.
 
 Minimum backend values:
 
@@ -173,12 +178,13 @@ Other active backend settings supported today:
 - `RATE_LIMIT_MAX_REQUESTS`
 - `LOG_LEVEL`
 
-Seed admin behavior:
+Admin bootstrap behavior:
 
-- `SEED_ADMIN_NAME` and `SEED_ADMIN_EMAIL` control the initial seeded admin identity
+- `SEED_ADMIN_NAME` and `SEED_ADMIN_EMAIL` control the initial admin identity
 - `SEED_ADMIN_DEPARTMENT` defaults to `Orthodontics`
-- if `SEED_ADMIN_PASSWORD` is blank, `npm run seed` generates a temporary password and forces password change on first login
-- if `SEED_ADMIN_PASSWORD` is provided, that password is used and `must_change_password` is not set by seed
+- if `SEED_ADMIN_PASSWORD` is blank, `npm run ensure-admin` generates a temporary password and forces password change on first login
+- if `SEED_ADMIN_PASSWORD` is provided, that password is used and `must_change_password` is not set
+- `npm run ensure-admin` leaves an existing active admin unchanged unless `npm run reset-admin-password` is used
 
 Frontend environment:
 
@@ -188,67 +194,83 @@ VITE_GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
 
 ## 8. Local Full-Stack Startup
 
-### Backend
+### Recommended new-device startup
 
-From `Backend/`:
+From the repository root:
+
+```bash
+cp codes/Backend/.env.example codes/Backend/.env
+# edit codes/Backend/.env with the local MySQL credentials and admin values
+./start.sh
+```
+
+The root `start.sh` helper:
+
+- installs backend and frontend dependencies when `node_modules` is missing
+- creates `codes/Frontend/.env` if missing
+- copies `GOOGLE_CLIENT_ID` to `VITE_GOOGLE_CLIENT_ID` when the frontend value is missing
+- runs `npm run bootstrap-db` to create the configured database/schema when needed
+- runs `npm run ensure-admin` to create or verify an active admin account
+- starts backend on `http://localhost:3000`
+- starts frontend on `http://localhost:5173`
+- waits for readiness, opens the browser, and stops managed child processes on `Ctrl+C`
+
+### Backend manual startup
+
+From `codes/Backend/`:
 
 ```bash
 npm install
-npm run migrate
-npm run seed
+npm run bootstrap-db
+npm run ensure-admin
 npm run dev
 ```
 
 Notes:
 
-- `npm run migrate` prepares the schema
-- `npm run seed` clears existing seeded tables and reloads baseline data
-- `npm run dev` currently runs `node server.js`
+- `npm run bootstrap-db` initializes a missing or empty OrthoFlow database and applies runtime schema guards.
+- `npm run bootstrap-db` refuses to initialize a non-empty unknown database.
+- `npm run ensure-admin` is idempotent when an active admin exists.
+- `npm run seed` remains available for deliberate data reset, but it clears core application tables and is not the normal startup path.
+- `npm run dev` currently runs `node server.js`.
 
-### Frontend
+### Frontend manual startup
 
-From `Frontend/`:
+From `codes/Frontend/`:
 
 ```bash
 npm install
 npm run dev
 ```
 
-### Two-terminal startup
+### Two-terminal manual startup
+
+Terminal 1:
 
 ```bash
-cd Backend && npm run dev
-cd Frontend && npm run dev
+cd codes/Backend && npm run bootstrap-db && npm run ensure-admin && npm run dev
 ```
 
-### Helper script
-
-From repo root:
+Terminal 2:
 
 ```bash
-./start-orthoflow.sh
+cd codes/Frontend && npm run dev
 ```
 
-Current helper-script behavior:
+## 9. Local Admin Account
 
-- reuses existing listeners on ports `3000` and `5173`
-- waits for backend `/health`
-- waits for frontend root page
-- opens the frontend in the default browser
-- stops child processes on `Ctrl+C`
-
-## 9. Seeded Local Account
-
-`Backend/scripts/seed.js` currently creates one baseline admin user from `Backend/.env`:
+`codes/Backend/scripts/ensure-admin.js` ensures at least one active admin user from `codes/Backend/.env`:
 
 - email: `SEED_ADMIN_EMAIL` or `admin@orthoflow.edu`
 - name: `SEED_ADMIN_NAME` or `System Administrator`
 - department: `SEED_ADMIN_DEPARTMENT` or `Orthodontics`
 - password:
   - `SEED_ADMIN_PASSWORD` if provided
-  - otherwise an auto-generated temporary password printed by the seed command
+  - otherwise an auto-generated temporary password printed by the setup command
 
-If the password is auto-generated, the seeded admin must change it after the first login.
+If the password is auto-generated, the admin must change it after the first login.
+
+`codes/Backend/scripts/seed.js` is a reset utility. It creates a baseline admin too, but it first clears core application tables.
 
 ## 10. Google Sign-In
 
@@ -259,8 +281,8 @@ Required setup:
 1. Create a Google OAuth web client.
 2. Add `http://localhost:5173` to authorized JavaScript origins.
 3. Put the same client ID in:
-   - `Backend/.env` as `GOOGLE_CLIENT_ID`
-   - `Frontend/.env` as `VITE_GOOGLE_CLIENT_ID`
+   - `codes/Backend/.env` as `GOOGLE_CLIENT_ID`
+   - `codes/Frontend/.env` as `VITE_GOOGLE_CLIENT_ID`
 
 Current backend behavior:
 
