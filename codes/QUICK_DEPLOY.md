@@ -101,7 +101,7 @@ So if you deploy the backend anywhere else, you must update that file or place t
 From repo root:
 
 ```bash
-./start-orthoflow.sh
+./start.sh
 ```
 
 Current helper behavior:

@@ -29,7 +29,7 @@ Orthodontics Workflow Automation System/
 ├── Frontend/
 │   ├── .env
 │   └── src/app/
-└── start-orthoflow.sh
+└── start.sh
 ```
 
 ## 3. Backend Integration Surface
