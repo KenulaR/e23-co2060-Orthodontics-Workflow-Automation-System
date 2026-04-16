@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { CheckCircle2, FolderOpen, XCircle } from 'lucide-react';
 import { Card, Badge, Button, RefreshButton } from '../components/UI';
 import { apiService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -24,6 +24,23 @@ export function RequestApprovalsPage() {
   const [error, setError] = useState<string | null>(null);
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    requestId: number | null;
+    decision: 'APPROVE' | 'REJECT';
+    title: string;
+    message: string;
+    confirmText: string;
+    tone: 'primary' | 'danger';
+  }>({
+    open: false,
+    requestId: null,
+    decision: 'APPROVE',
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+    tone: 'primary',
+  });
 
   const canView = ['ORTHODONTIST', 'DENTAL_SURGEON'].includes(user?.role || '');
   if (!canView) return <Navigate to="/" replace />;
@@ -67,6 +84,36 @@ export function RequestApprovalsPage() {
     } finally {
       setProcessingId(null);
     }
+  };
+
+  const openConfirmDialog = (request: PendingRequest, decision: 'APPROVE' | 'REJECT') => {
+    const patientName =
+      `${request.first_name || ''} ${request.last_name || ''}`.trim() || `Patient #${request.patient_id}`;
+    const isAssign = request.action_type === 'ASSIGN';
+
+    setConfirmDialog({
+      open: true,
+      requestId: request.id,
+      decision,
+      title: decision === 'APPROVE' ? 'Confirm Approval' : 'Confirm Rejection',
+      message:
+        decision === 'APPROVE'
+          ? `Are you sure you want to approve the ${isAssign ? 'assignment' : 'removal'} request for ${patientName}${request.patient_code ? ` (${request.patient_code})` : ''}?`
+          : `Are you sure you want to reject the ${isAssign ? 'assignment' : 'removal'} request for ${patientName}${request.patient_code ? ` (${request.patient_code})` : ''}?`,
+      confirmText: decision === 'APPROVE' ? 'Approve Request' : 'Reject Request',
+      tone: decision === 'APPROVE' ? 'primary' : 'danger',
+    });
+  };
+
+  const closeConfirmDialog = () => {
+    if (confirmDialog.requestId !== null && processingId === confirmDialog.requestId) return;
+    setConfirmDialog((prev) => ({ ...prev, open: false, requestId: null }));
+  };
+
+  const runConfirmDialog = async () => {
+    if (confirmDialog.requestId === null) return;
+    await respond(confirmDialog.requestId, confirmDialog.decision);
+    setConfirmDialog((prev) => ({ ...prev, open: false, requestId: null }));
   };
 
   return (
@@ -117,30 +164,33 @@ export function RequestApprovalsPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => navigate(`/patients/${req.patient_id}`)}
-                  >
-                    Open Patient
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="bg-red-600 border-red-600 hover:bg-red-700 active:bg-red-800"
-                    onClick={() => respond(req.id, 'REJECT')}
-                    disabled={processingId === req.id}
-                  >
-                    <XCircle className="w-4 h-4 mr-1" />
-                    Reject
-                  </Button>
+                  {!isAssign && (
+                    <Button
+                      size="sm"
+                      className="bg-blue-600 border-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 shadow-sm hover:shadow-md"
+                      onClick={() => navigate(`/patients/${req.patient_id}`)}
+                    >
+                      <FolderOpen className="w-4 h-4 mr-1" />
+                      Open Patient
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     className="bg-green-600 border-green-600 hover:bg-green-700 active:bg-green-800"
-                    onClick={() => respond(req.id, 'APPROVE')}
+                    onClick={() => openConfirmDialog(req, 'APPROVE')}
                     disabled={processingId === req.id}
                   >
                     <CheckCircle2 className="w-4 h-4 mr-1" />
                     {processingId === req.id ? 'Submitting...' : 'Approve'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-red-600 border-red-600 hover:bg-red-700 active:bg-red-800"
+                    onClick={() => openConfirmDialog(req, 'REJECT')}
+                    disabled={processingId === req.id}
+                  >
+                    <XCircle className="w-4 h-4 mr-1" />
+                    Reject
                   </Button>
                 </div>
               </div>
@@ -148,6 +198,55 @@ export function RequestApprovalsPage() {
           })}
         </div>
       </Card>
+
+      {confirmDialog.open && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/45 backdrop-blur-[1px] p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+            <div
+              className={`px-5 py-4 border-b ${
+                confirmDialog.tone === 'danger'
+                  ? 'bg-red-50 border-red-100'
+                  : 'bg-green-50 border-green-100'
+              }`}
+            >
+              <h3 className="text-lg font-extrabold text-slate-900">{confirmDialog.title}</h3>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div
+                className={`rounded-lg border px-3 py-2 text-sm ${
+                  confirmDialog.tone === 'danger'
+                    ? 'border-red-200 bg-red-50 text-red-800'
+                    : 'border-green-200 bg-green-50 text-green-800'
+                }`}
+              >
+                {confirmDialog.message}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="secondary"
+                  onClick={closeConfirmDialog}
+                  disabled={confirmDialog.requestId !== null && processingId === confirmDialog.requestId}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className={
+                    confirmDialog.tone === 'danger'
+                      ? 'bg-red-600 border-red-600 hover:bg-red-700 active:bg-red-800'
+                      : 'bg-green-600 border-green-600 hover:bg-green-700 active:bg-green-800'
+                  }
+                  onClick={runConfirmDialog}
+                  disabled={confirmDialog.requestId !== null && processingId === confirmDialog.requestId}
+                >
+                  {confirmDialog.requestId !== null && processingId === confirmDialog.requestId
+                    ? 'Processing...'
+                    : confirmDialog.confirmText}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

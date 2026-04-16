@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { AlertCircle, CheckCircle2, UserCheck, UserX } from 'lucide-react';
+import { AlertCircle, CheckCircle2, FolderOpen, UserCheck, UserX } from 'lucide-react';
 import { apiService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Button } from './UI';
@@ -24,6 +24,21 @@ export function AssignmentRequestPrompt() {
   const [loading, setLoading] = useState(false);
   const [requests, setRequests] = useState<PendingAssignmentRequest[]>([]);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    decision: 'APPROVE' | 'REJECT';
+    title: string;
+    message: string;
+    confirmText: string;
+    tone: 'primary' | 'danger';
+  }>({
+    open: false,
+    decision: 'APPROVE',
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+    tone: 'primary',
+  });
 
   const canReviewRequests = ['ORTHODONTIST', 'DENTAL_SURGEON'].includes(user?.role || '');
 
@@ -73,6 +88,30 @@ export function AssignmentRequestPrompt() {
   const actionLabel = current.action_type === 'ASSIGN' ? 'assign you to' : 'remove you from';
   const isAssignRequest = current.action_type === 'ASSIGN';
 
+  const openConfirmDialog = (decision: 'APPROVE' | 'REJECT') => {
+    setConfirmDialog({
+      open: true,
+      decision,
+      title: decision === 'APPROVE' ? 'Confirm Approval' : 'Confirm Rejection',
+      message:
+        decision === 'APPROVE'
+          ? `Are you sure you want to approve this ${isAssignRequest ? 'assignment' : 'removal'} request for ${patientLabel}${current.patient_code ? ` (${current.patient_code})` : ''}?`
+          : `Are you sure you want to reject this ${isAssignRequest ? 'assignment' : 'removal'} request for ${patientLabel}${current.patient_code ? ` (${current.patient_code})` : ''}?`,
+      confirmText: decision === 'APPROVE' ? 'Approve Request' : 'Reject Request',
+      tone: decision === 'APPROVE' ? 'primary' : 'danger',
+    });
+  };
+
+  const closeConfirmDialog = () => {
+    if (processingId === current.id) return;
+    setConfirmDialog((prev) => ({ ...prev, open: false }));
+  };
+
+  const runConfirmDialog = async () => {
+    await respond(confirmDialog.decision);
+    setConfirmDialog((prev) => ({ ...prev, open: false }));
+  };
+
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 backdrop-blur-[1px] p-4">
       <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
@@ -95,12 +134,15 @@ export function AssignmentRequestPrompt() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => navigate(`/patients/${current.patient_id}`)}
-            >
-              Open Patient Record
-            </Button>
+            {!isAssignRequest && (
+              <Button
+                className="bg-blue-600 border-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 shadow-sm hover:shadow-md"
+                onClick={() => navigate(`/patients/${current.patient_id}`)}
+              >
+                <FolderOpen className="w-4 h-4 mr-1" />
+                Open Patient
+              </Button>
+            )}
             <span className="text-xs text-slate-500">
               {loading ? 'Refreshing requests...' : `${requests.length} pending`}
             </span>
@@ -108,20 +150,20 @@ export function AssignmentRequestPrompt() {
 
           <div className="flex justify-end gap-2 pt-2">
             <Button
-              className="bg-red-600 border-red-600 hover:bg-red-700 active:bg-red-800"
-              onClick={() => respond('REJECT')}
-              disabled={processingId === current.id}
-            >
-              <UserX className="w-4 h-4 mr-1" />
-              Reject
-            </Button>
-            <Button
               className="bg-green-600 border-green-600 hover:bg-green-700 active:bg-green-800"
-              onClick={() => respond('APPROVE')}
+              onClick={() => openConfirmDialog('APPROVE')}
               disabled={processingId === current.id}
             >
               <UserCheck className="w-4 h-4 mr-1" />
               {processingId === current.id ? 'Submitting...' : 'Approve'}
+            </Button>
+            <Button
+              className="bg-red-600 border-red-600 hover:bg-red-700 active:bg-red-800"
+              onClick={() => openConfirmDialog('REJECT')}
+              disabled={processingId === current.id}
+            >
+              <UserX className="w-4 h-4 mr-1" />
+              Reject
             </Button>
           </div>
           <p className="text-xs text-slate-500 flex items-center gap-1">
@@ -130,6 +172,53 @@ export function AssignmentRequestPrompt() {
           </p>
         </div>
       </div>
+
+      {confirmDialog.open && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/45 backdrop-blur-[1px] p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+            <div
+              className={`px-5 py-4 border-b ${
+                confirmDialog.tone === 'danger'
+                  ? 'bg-red-50 border-red-100'
+                  : 'bg-green-50 border-green-100'
+              }`}
+            >
+              <h3 className="text-lg font-extrabold text-slate-900">{confirmDialog.title}</h3>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div
+                className={`rounded-lg border px-3 py-2 text-sm ${
+                  confirmDialog.tone === 'danger'
+                    ? 'border-red-200 bg-red-50 text-red-800'
+                    : 'border-green-200 bg-green-50 text-green-800'
+                }`}
+              >
+                {confirmDialog.message}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="secondary"
+                  onClick={closeConfirmDialog}
+                  disabled={processingId === current.id}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className={
+                    confirmDialog.tone === 'danger'
+                      ? 'bg-red-600 border-red-600 hover:bg-red-700 active:bg-red-800'
+                      : 'bg-green-600 border-green-600 hover:bg-green-700 active:bg-green-800'
+                  }
+                  onClick={runConfirmDialog}
+                  disabled={processingId === current.id}
+                >
+                  {processingId === current.id ? 'Processing...' : confirmDialog.confirmText}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
