@@ -93,8 +93,11 @@ export function ClinicQueuePage() {
     }
   };
 
+  // FIXED: Removed old undefined variables and updated to use newPatient state
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newPatient.patient_id) return; 
+
     try {
       const response = await fetch('http://localhost:3000/api/queue', {
         method: 'POST',
@@ -135,6 +138,7 @@ export function ClinicQueuePage() {
     }
   };
 
+  // FIXED: Restored the missing handleDoctorClick function
   const handleDoctorClick = (item: any) => {
     const isDoctor = currentUserRole === 'DENTAL_SURGEON' || currentUserRole === 'ORTHODONTIST';
     if (isDoctor && item.status === 'In waiting room') {

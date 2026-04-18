@@ -4,8 +4,20 @@ React + Vite frontend for the current Orthodontics Workflow Automation System.
 
 ## Run Locally
 
+Recommended full-system startup from the repository root:
+
 ```bash
-cd Frontend
+cp codes/Backend/.env.example codes/Backend/.env
+# edit codes/Backend/.env with your local MySQL credentials and admin values
+./start.sh
+```
+
+The root `start.sh` helper installs missing dependencies, creates `codes/Frontend/.env` if needed, copies `GOOGLE_CLIENT_ID` from the backend env when `VITE_GOOGLE_CLIENT_ID` is missing, starts both services, waits for readiness, and opens the app.
+
+Manual frontend-only startup:
+
+```bash
+cd codes/Frontend
 npm install
 cp .env.example .env
 npm run dev
@@ -17,7 +29,7 @@ Default URL:
 
 ## Environment
 
-Set in `Frontend/.env`:
+Set in `codes/Frontend/.env`:
 
 ```env
 VITE_GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
@@ -29,12 +41,14 @@ The frontend currently expects the backend API at `http://localhost:3000`.
 
 That base URL is hardcoded in:
 
-- `Frontend/src/app/config/api.ts`
+- `codes/Frontend/src/app/config/api.ts`
 
-Run backend in parallel:
+Run backend in parallel manually:
 
 ```bash
 cd ../Backend
+npm run bootstrap-db
+npm run ensure-admin
 npm run dev
 ```
 
