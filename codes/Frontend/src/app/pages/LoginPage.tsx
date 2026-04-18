@@ -10,7 +10,64 @@ declare global {
   }
 }
 
+// BONUS FIX: Moved this outside the main component so React doesn't redraw it from scratch on every keystroke!
+const ToothLogo = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <defs>
+      <linearGradient id="toothBase" x1="20" y1="18" x2="78" y2="90" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#FFFFFF" />
+        <stop offset="55%" stopColor="#EAF4FF" />
+        <stop offset="100%" stopColor="#CFE3FF" />
+      </linearGradient>
+      <radialGradient id="toothCrownGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(50 28) rotate(90) scale(24 28)">
+        <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.85" />
+        <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0" />
+      </radialGradient>
+      <linearGradient id="toothShadow" x1="62" y1="24" x2="74" y2="80" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#8BB4E8" stopOpacity="0.12" />
+        <stop offset="100%" stopColor="#5D8FCF" stopOpacity="0.35" />
+      </linearGradient>
+    </defs>
+    <path 
+      d="M50 14C46 14 42 15 39 16.5C36.5 17.8 34.8 19.2 33.2 20.8C31.6 22.4 30.1 23.2 28.2 23.3C26.6 23.4 25 24.2 23.8 26C22 28.6 21 31.8 20.8 35.8C20.5 42 22 48.8 24.6 55C27.2 61.1 30.9 66.8 33 73.2C34.8 78.7 35 84.6 37.8 88.9C39.8 92 43 92.7 44.7 90.8C46.8 88.7 47.4 84.2 48.6 76.6C49 74.3 51 74.3 51.4 76.6C52.6 84.2 53.2 88.7 55.3 90.8C57 92.7 60.2 92 62.2 88.9C65 84.6 65.2 78.7 67 73.2C69.1 66.8 72.8 61.1 75.4 55C78 48.8 79.5 42 79.2 35.8C79 31.8 78 28.6 76.2 26C75 24.2 73.4 23.4 71.8 23.3C69.9 23.2 68.4 22.4 66.8 20.8C65.2 19.2 63.5 17.8 61 16.5C58 15 54 14 50 14Z" 
+      fill="url(#toothBase)"
+    />
+    <path
+      d="M64 20C68 23 71 30 71 40C71 50 68 61 64 71C62 76 61 82 60 87C61 88 62 88 62 88C65 84 65 79 67 74C69 68 73 62 76 55C80 46 81 36 77 28C75 24 73 21 69 18C67 17 65 16 64 16V20Z"
+      fill="url(#toothShadow)"
+    />
+    <path
+      d="M30 26.8C33.2 23.2 39.6 20.4 46 20.8C47.8 20.9 49 21.5 50 22.2C51 21.5 52.2 20.9 54 20.8C60.4 20.4 66.8 23.2 70 26.8"
+      stroke="#FFFFFF"
+      strokeOpacity="0.65"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+    <ellipse cx="50" cy="28" rx="18" ry="14" fill="url(#toothCrownGlow)" />
+    <path d="M40 30L39 38" stroke="#BFD6F3" strokeOpacity="0.55" strokeWidth="1.1" strokeLinecap="round" />
+    <path d="M47 29L46 39" stroke="#BFD6F3" strokeOpacity="0.5" strokeWidth="1.1" strokeLinecap="round" />
+    <path d="M54 29L54 40" stroke="#BFD6F3" strokeOpacity="0.45" strokeWidth="1.1" strokeLinecap="round" />
+    <path d="M61 30L62 39" stroke="#BFD6F3" strokeOpacity="0.4" strokeWidth="1.1" strokeLinecap="round" />
+    <ellipse cx="50" cy="21.5" rx="3.1" ry="1.95" fill="#6B7686" fillOpacity="0.42" />
+    <ellipse cx="50.5" cy="21.2" rx="1.75" ry="1.05" fill="#2E3744" fillOpacity="0.34" />
+    <path d="M48.2 20.9C48.9 20.2 49.9 19.9 51 20.1" stroke="#A7B0BC" strokeOpacity="0.35" strokeWidth="0.7" strokeLinecap="round" />
+    <path 
+      d="M39 32C39 30 41 28 44 28C47 28 49 30 49 32C49 34 47 36 44 36C41 36 39 34 39 32Z" 
+      fill="white" 
+      fillOpacity="0.2"
+    />
+    <path 
+      d="M50 21C40 21 31 28 29 39" 
+      stroke="white" 
+      strokeWidth="2" 
+      strokeLinecap="round" 
+      strokeOpacity="0.28"
+    />
+  </svg>
+);
+
 export function LoginPage() {
+  // ALL HOOKS ARE NOW AT THE TOP!
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -22,10 +79,6 @@ export function LoginPage() {
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const toothLogoRef = useRef<HTMLDivElement | null>(null);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
-
-  if (!authLoading && user) {
-    return <Navigate to="/" replace />;
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +125,7 @@ export function LoginPage() {
     );
   };
 
+  // The useEffect is now safely ABOVE the early return
   useEffect(() => {
     if (!googleClientId) {
       setGoogleLoading(false);
@@ -163,60 +217,10 @@ export function LoginPage() {
     };
   }, [googleClientId, loginWithGoogle, navigate]);
 
-  const ToothLogo = ({ className }: { className?: string }) => (
-    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-      <defs>
-        <linearGradient id="toothBase" x1="20" y1="18" x2="78" y2="90" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#FFFFFF" />
-          <stop offset="55%" stopColor="#EAF4FF" />
-          <stop offset="100%" stopColor="#CFE3FF" />
-        </linearGradient>
-        <radialGradient id="toothCrownGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(50 28) rotate(90) scale(24 28)">
-          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.85" />
-          <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0" />
-        </radialGradient>
-        <linearGradient id="toothShadow" x1="62" y1="24" x2="74" y2="80" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#8BB4E8" stopOpacity="0.12" />
-          <stop offset="100%" stopColor="#5D8FCF" stopOpacity="0.35" />
-        </linearGradient>
-      </defs>
-      <path 
-        d="M50 14C46 14 42 15 39 16.5C36.5 17.8 34.8 19.2 33.2 20.8C31.6 22.4 30.1 23.2 28.2 23.3C26.6 23.4 25 24.2 23.8 26C22 28.6 21 31.8 20.8 35.8C20.5 42 22 48.8 24.6 55C27.2 61.1 30.9 66.8 33 73.2C34.8 78.7 35 84.6 37.8 88.9C39.8 92 43 92.7 44.7 90.8C46.8 88.7 47.4 84.2 48.6 76.6C49 74.3 51 74.3 51.4 76.6C52.6 84.2 53.2 88.7 55.3 90.8C57 92.7 60.2 92 62.2 88.9C65 84.6 65.2 78.7 67 73.2C69.1 66.8 72.8 61.1 75.4 55C78 48.8 79.5 42 79.2 35.8C79 31.8 78 28.6 76.2 26C75 24.2 73.4 23.4 71.8 23.3C69.9 23.2 68.4 22.4 66.8 20.8C65.2 19.2 63.5 17.8 61 16.5C58 15 54 14 50 14Z" 
-        fill="url(#toothBase)"
-      />
-      <path
-        d="M64 20C68 23 71 30 71 40C71 50 68 61 64 71C62 76 61 82 60 87C61 88 62 88 62 88C65 84 65 79 67 74C69 68 73 62 76 55C80 46 81 36 77 28C75 24 73 21 69 18C67 17 65 16 64 16V20Z"
-        fill="url(#toothShadow)"
-      />
-      <path
-        d="M30 26.8C33.2 23.2 39.6 20.4 46 20.8C47.8 20.9 49 21.5 50 22.2C51 21.5 52.2 20.9 54 20.8C60.4 20.4 66.8 23.2 70 26.8"
-        stroke="#FFFFFF"
-        strokeOpacity="0.65"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <ellipse cx="50" cy="28" rx="18" ry="14" fill="url(#toothCrownGlow)" />
-      <path d="M40 30L39 38" stroke="#BFD6F3" strokeOpacity="0.55" strokeWidth="1.1" strokeLinecap="round" />
-      <path d="M47 29L46 39" stroke="#BFD6F3" strokeOpacity="0.5" strokeWidth="1.1" strokeLinecap="round" />
-      <path d="M54 29L54 40" stroke="#BFD6F3" strokeOpacity="0.45" strokeWidth="1.1" strokeLinecap="round" />
-      <path d="M61 30L62 39" stroke="#BFD6F3" strokeOpacity="0.4" strokeWidth="1.1" strokeLinecap="round" />
-      <ellipse cx="50" cy="21.5" rx="3.1" ry="1.95" fill="#6B7686" fillOpacity="0.42" />
-      <ellipse cx="50.5" cy="21.2" rx="1.75" ry="1.05" fill="#2E3744" fillOpacity="0.34" />
-      <path d="M48.2 20.9C48.9 20.2 49.9 19.9 51 20.1" stroke="#A7B0BC" strokeOpacity="0.35" strokeWidth="0.7" strokeLinecap="round" />
-      <path 
-        d="M39 32C39 30 41 28 44 28C47 28 49 30 49 32C49 34 47 36 44 36C41 36 39 34 39 32Z" 
-        fill="white" 
-        fillOpacity="0.2"
-      />
-      <path 
-        d="M50 21C40 21 31 28 29 39" 
-        stroke="white" 
-        strokeWidth="2" 
-        strokeLinecap="round" 
-        strokeOpacity="0.28"
-      />
-    </svg>
-  );
+  // ✅ THE FIX: The early return is safely below all hooks!
+  if (!authLoading && user) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="min-h-screen relative flex items-center justify-center p-4 overflow-hidden">

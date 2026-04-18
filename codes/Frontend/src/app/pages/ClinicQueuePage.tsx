@@ -1,39 +1,43 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../context/AuthContext'; // ✅ Added exact role syncing
 
 export function ClinicQueuePage() {
+  const { user } = useAuth();
+  
+  // ✅ 100% accurate role extraction directly from the AuthContext
+  const currentUserRole = user?.role?.toUpperCase() || (user as any)?.user?.role?.toUpperCase() || '';
+
   const [queueData, setQueueData] = useState<any[]>([]);
   const [patientsList, setPatientsList] = useState<any[]>([]);
   const [stats, setStats] = useState({ inTreatment: 0, waiting: 0, done: 0, totalToday: 0 });
   const [isLoading, setIsLoading] = useState(true);
-  const [currentUserRole, setCurrentUserRole] = useState<string>('');
-  const [authToken, setAuthToken] = useState<string>('');
 
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [newPatient, setNewPatient] = useState({ patient_id: '', status: 'In waiting room' });
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [selectedPatientLabel, setSelectedPatientLabel] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  // ✅ Token extraction happens exactly when the fetch is called to prevent 401 errors
+  const getAuthHeaders = () => {
     const storedUser = localStorage.getItem('user');
+    let token = '';
     if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        setCurrentUserRole(user.role || '');
-        setAuthToken(user.token || '');
-      } catch (e) {
-        console.error("Failed to parse user session");
-      }
+      try { token = JSON.parse(storedUser).token || ''; } catch (e) {}
     }
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    };
+  };
 
+  useEffect(() => {
     fetchClinicBoard();
     fetchPatientsList();
-
     const interval = setInterval(fetchClinicBoard, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUserRole]); // Reload if user role changes
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -45,42 +49,20 @@ export function ClinicQueuePage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const getAuthHeaders = () => {
-    try {
-      const storedUser = localStorage.getItem('user');
-      const token = storedUser ? JSON.parse(storedUser).token : '';
-      return {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      };
-    } catch {
-      return { 'Content-Type': 'application/json' };
-    }
-  };
-
   const fetchPatientsList = async () => {
     try {
-      const response = await fetch('http://localhost:3000/api/queue/patients', {
-        headers: getAuthHeaders()
-      });
+      const response = await fetch('http://localhost:3000/api/queue/patients', { headers: getAuthHeaders() });
       const result = await response.json();
-
-      if (result.success && Array.isArray(result.data)) {
-        setPatientsList(result.data);
-      } else {
-        setPatientsList([]);
-      }
+      if (result.success && Array.isArray(result.data)) setPatientsList(result.data);
+      else setPatientsList([]);
     } catch (error) {
-      console.error("Failed to fetch patients list:", error);
       setPatientsList([]);
     }
   };
 
   const fetchClinicBoard = async () => {
     try {
-      const response = await fetch('http://localhost:3000/api/queue', {
-        headers: getAuthHeaders()
-      });
+      const response = await fetch('http://localhost:3000/api/queue', { headers: getAuthHeaders() });
       const result = await response.json();
       if (result.success) {
         setQueueData(result.data);
@@ -93,7 +75,6 @@ export function ClinicQueuePage() {
     }
   };
 
-  // FIXED: Removed old undefined variables and updated to use newPatient state
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPatient.patient_id) return; 
@@ -120,7 +101,6 @@ export function ClinicQueuePage() {
     setIsRegisterModalOpen(false);
     setNewPatient({ patient_id: '', status: 'In waiting room' });
     setSearchQuery('');
-    setSelectedPatientLabel('');
     setIsDropdownOpen(false);
   };
 
@@ -138,9 +118,8 @@ export function ClinicQueuePage() {
     }
   };
 
-  // FIXED: Restored the missing handleDoctorClick function
   const handleDoctorClick = (item: any) => {
-    const isDoctor = currentUserRole === 'DENTAL_SURGEON' || currentUserRole === 'ORTHODONTIST';
+    const isDoctor = ['DENTAL_SURGEON', 'ORTHODONTIST'].includes(currentUserRole);
     if (isDoctor && item.status === 'In waiting room') {
       updatePatientStatus(item.queue_id, 'under consultation');
     }
@@ -153,11 +132,12 @@ export function ClinicQueuePage() {
     return fullName.includes(query) || code.includes(query);
   });
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-64 font-medium text-slate-500">Loading Clinic Live...</div>;
-  }
+  if (isLoading) return <div className="flex items-center justify-center h-64 font-medium text-slate-500">Loading Clinic Live...</div>;
 
-  const isDoctor = currentUserRole === 'DENTAL_SURGEON' || currentUserRole === 'ORTHODONTIST';
+  // ✅ Proper button visibility logic
+  const isDoctor = ['DENTAL_SURGEON', 'ORTHODONTIST'].includes(currentUserRole);
+  const canAddPatient = ['RECEPTION', 'DENTAL_SURGEON', 'ORTHODONTIST', 'ADMIN'].includes(currentUserRole);
+  const isStatusLocked = ['NURSE', 'STUDENT'].includes(currentUserRole);
 
   return (
     <div className="space-y-6">
@@ -183,7 +163,7 @@ export function ClinicQueuePage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50">
           <h2 className="text-lg font-bold text-slate-800">Live Clinic Queue</h2>
-          {!isDoctor && (
+          {canAddPatient && (
             <button
               onClick={() => setIsRegisterModalOpen(true)}
               className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
@@ -232,23 +212,20 @@ export function ClinicQueuePage() {
                     ${item.status === 'under consultation'        ? 'bg-purple-50 text-purple-700 ring-purple-200' : ''}
                     ${item.status === 'under treatment'           ? 'bg-blue-50   text-blue-700   ring-blue-200'   : ''}
                     ${item.status === 'Treatments are done / Done'? 'bg-green-50  text-green-700  ring-green-200'  : ''}
-                    ${['NURSE', 'STUDENT', 'RECEPTION'].includes(currentUserRole) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
-                  disabled={['NURSE', 'STUDENT', 'RECEPTION'].includes(currentUserRole)}
+                    ${isStatusLocked ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                  disabled={isStatusLocked}
                 >
                   <option value="In waiting room">In waiting room</option>
                   <option value="under consultation">Under consultation</option>
                   <option value="under treatment">Under treatment</option>
-                  {!['NURSE', 'STUDENT', 'RECEPTION'].includes(currentUserRole) && (
+                  {!isStatusLocked && (
                     <option value="Treatments are done / Done">Done</option>
                   )}
                 </select>
               </div>
             </div>
           ))}
-
-          {queueData.length === 0 && (
-            <div className="p-8 text-center text-slate-500">No patients currently in the queue.</div>
-          )}
+          {queueData.length === 0 && <div className="p-8 text-center text-slate-500">No patients currently in the queue.</div>}
         </div>
       </div>
 
@@ -261,36 +238,26 @@ export function ClinicQueuePage() {
             </div>
 
             <form onSubmit={handleRegisterSubmit} className="space-y-5">
-
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
-                  Patient
-                </label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Patient</label>
                 <div className="relative" ref={dropdownRef}>
                   <input
                     type="text"
-                    className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                    placeholder="Search by name or patient ID..."
+                    className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none text-sm"
+                    placeholder="Search by name or ID..."
                     value={searchQuery}
                     onChange={(e) => {
                       setSearchQuery(e.target.value);
                       setIsDropdownOpen(true);
                       setNewPatient(prev => ({ ...prev, patient_id: '' }));
-                      setSelectedPatientLabel('');
                     }}
                     onFocus={() => setIsDropdownOpen(true)}
                   />
 
                   {isDropdownOpen && (
                     <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
-                      {patientsList.length === 0 ? (
-                        <div className="px-4 py-3 text-sm text-slate-400 text-center">
-                          No patients found. Check your connection.
-                        </div>
-                      ) : filteredPatients.length === 0 ? (
-                        <div className="px-4 py-3 text-sm text-slate-400 text-center">
-                          No patients match "{searchQuery}"
-                        </div>
+                      {filteredPatients.length === 0 ? (
+                        <div className="px-4 py-3 text-sm text-slate-400 text-center">No patients found.</div>
                       ) : (
                         filteredPatients.map(p => (
                           <button
@@ -298,39 +265,24 @@ export function ClinicQueuePage() {
                             type="button"
                             className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors flex items-center justify-between gap-2"
                             onClick={() => {
-                              const label = `${p.first_name} ${p.last_name}`;
-                              setNewPatient(prev => ({ ...prev, patient_id: String(p.id) }));
-                              setSelectedPatientLabel(label);
-                              setSearchQuery(label);
+                              setNewPatient({ ...newPatient, patient_id: String(p.id) });
+                              setSearchQuery(`${p.first_name} ${p.last_name}`);
                               setIsDropdownOpen(false);
                             }}
                           >
-                            <span className="text-sm font-medium text-slate-800">
-                              {p.first_name} {p.last_name}
-                            </span>
-                            {p.patient_code && (
-                              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded shrink-0">
-                                {p.patient_code}
-                              </span>
-                            )}
+                            <span className="text-sm font-medium text-slate-800">{p.first_name} {p.last_name}</span>
                           </button>
                         ))
                       )}
                     </div>
                   )}
                 </div>
-
-                {!newPatient.patient_id && searchQuery && (
-                  <p className="text-xs text-amber-600 mt-1">Please select a patient from the list.</p>
-                )}
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
-                  Initial Status
-                </label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Initial Status</label>
                 <select
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none bg-white text-sm"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 bg-white text-sm"
                   value={newPatient.status}
                   onChange={(e) => setNewPatient({ ...newPatient, status: e.target.value })}
                 >
@@ -341,20 +293,8 @@ export function ClinicQueuePage() {
               </div>
 
               <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="flex-1 bg-slate-100 text-slate-700 font-medium py-2.5 rounded-lg hover:bg-slate-200 transition-colors text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newPatient.patient_id}
-                  className="flex-1 bg-blue-600 text-white font-medium py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-sm"
-                >
-                  Add to Queue
-                </button>
+                <button type="button" onClick={handleCloseModal} className="flex-1 bg-slate-100 py-2.5 rounded-lg text-sm">Cancel</button>
+                <button type="submit" disabled={!newPatient.patient_id} className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm disabled:opacity-40">Add to Queue</button>
               </div>
             </form>
           </div>

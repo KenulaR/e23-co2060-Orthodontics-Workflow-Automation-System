@@ -8,7 +8,7 @@ const {
 const { logAuditEvent } = require('../middleware/errorHandler');
 const { hasPermission, OBJECT_TYPES, PERMISSIONS } = require('../middleware/accessControl');
 
-const ASSIGNMENT_SCOPED_ROLES = new Set(['ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT']);
+// Removed ASSIGNMENT_SCOPED_ROLES restriction to allow all roles to see all patients
 const APPROVAL_REQUIRED_ASSIGNMENT_ROLES = new Set(['ORTHODONTIST', 'DENTAL_SURGEON']);
 
 const SORT_FIELD_MAP = {
@@ -50,7 +50,7 @@ const normalizeRegistrationDateTime = (value) => {
 
   const dateOnly = raw.match(/^(\d{4}-\d{2}-\d{2})$/);
   if (dateOnly) {
-    return `${dateOnly[1]} 00:00:00`;
+    return `${dateOnly} 00:00:00`;
   }
 
   const parsed = new Date(raw);
@@ -123,7 +123,7 @@ const wrapLine = (text, maxLen = 105) => {
   if (words.length === 0) return [''];
 
   const lines = [];
-  let current = words[0];
+  let current = words;
   for (let i = 1; i < words.length; i += 1) {
     const next = words[i];
     if ((current + ' ' + next).length <= maxLen) {
@@ -183,7 +183,7 @@ endstream`;
   objectBodies[fontObjectNumber - 1] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
 
   let pdf = '%PDF-1.4\n';
-  const offsets = [0];
+  const offsets =[];
   for (let i = 0; i < objectBodies.length; i += 1) {
     offsets.push(Buffer.byteLength(pdf, 'utf8'));
     pdf += `${i + 1} 0 obj\n${objectBodies[i]}\nendobj\n`;
@@ -390,7 +390,6 @@ const buildDentalChartVersionHtml = ({ patient, version }) => {
 };
 
 const buildDentalChartVersionVisualPdf = async ({ patient, version }) => {
-  // Optional dependency. If unavailable in deployment, caller should fallback.
   const { chromium } = require('playwright');
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   try {
@@ -412,7 +411,7 @@ const formatDateTime = (value) => {
   const raw = String(value).trim();
   const direct = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?/);
   if (direct) {
-    return `${direct[1]} ${direct[2]}`;
+    return `${direct} ${direct}`;
   }
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
@@ -428,7 +427,7 @@ const formatDateOnly = (value) => {
   if (!value) return 'N/A';
   const raw = String(value).trim();
   const direct = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (direct) return direct[1];
+  if (direct) return direct;
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
   return parsed.toISOString().slice(0, 10);
@@ -850,20 +849,7 @@ const getPatients = async (req, res) => {
       whereValues.push(registeredTo);
     }
 
-    if (ASSIGNMENT_SCOPED_ROLES.has(req.user.role)) {
-      whereClauses.push(`
-        EXISTS (
-          SELECT 1
-          FROM patient_assignments pa_scope
-          WHERE pa_scope.patient_id = p.id
-            AND pa_scope.user_id = ?
-            AND pa_scope.assignment_role = ?
-            AND pa_scope.active = TRUE
-          LIMIT 1
-        )
-      `);
-      whereValues.push(req.user.id, req.user.role);
-    }
+    // ✅ REMOVED ASSIGNMENT_SCOPED_ROLES BLOCK HERE to allow all users to see the full patient list!
 
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
@@ -871,7 +857,7 @@ const getPatients = async (req, res) => {
       `SELECT COUNT(*) as total FROM patients p ${whereSql}`,
       whereValues
     );
-    const total = totalResult[0].total;
+    const total = totalResult.total;
 
     const patients = await query(
       `SELECT 
@@ -958,8 +944,8 @@ const getPatients = async (req, res) => {
 
         return {
           ...patient,
-          total_visits: visitCount[0].count,
-          last_visit: lastVisit[0]?.visit_date || null
+          total_visits: visitCount.count,
+          last_visit: lastVisit?.visit_date || null
         };
       })
     );
@@ -1251,7 +1237,7 @@ const deletePatient = async (req, res) => {
 
     if (permanent) {
       const rows = await query('SELECT * FROM patients WHERE id = ? LIMIT 1', [id]);
-      const existingPatient = rows[0];
+      const existingPatient = rows;
       if (!existingPatient) {
         return res.status(404).json({
           success: false,
@@ -1285,15 +1271,13 @@ const deletePatient = async (req, res) => {
       });
     }
 
-    // Admin can always inactivate a patient, even with active cases/upcoming visits.
-    // Keep the safeguard for any future non-admin delete flows.
     if (req.user.role !== 'ADMIN') {
       const [activeCases, upcomingVisits] = await Promise.all([
         query('SELECT COUNT(*) as count FROM cases WHERE patient_id = ? AND status IN ("ASSIGNED", "PENDING_VERIFICATION")', [id]),
         query('SELECT COUNT(*) as count FROM visits WHERE patient_id = ? AND visit_date > NOW() AND status != "CANCELLED"', [id])
       ]);
 
-      if (activeCases[0].count > 0 || upcomingVisits[0].count > 0) {
+      if (activeCases.count > 0 || upcomingVisits.count > 0) {
         return res.status(400).json({
           success: false,
           message: 'Cannot delete patient with active cases or upcoming visits'
@@ -1325,7 +1309,7 @@ const reactivatePatient = async (req, res) => {
     const { id } = req.params;
 
     const rows = await query('SELECT * FROM patients WHERE id = ? LIMIT 1', [id]);
-    const existingPatient = rows[0];
+    const existingPatient = rows;
     if (!existingPatient) {
       return res.status(404).json({
         success: false,
@@ -1392,7 +1376,7 @@ const getPatientStats = async (req, res) => {
     res.json({
       success: true,
       data: {
-        overview: stats[0],
+        overview: stats,
         monthly_new_patients: monthlyStats
       }
     });
@@ -1859,7 +1843,7 @@ const respondToAssignmentRequest = async (req, res) => {
        LIMIT 1`,
       [requestId, req.user.id]
     );
-    const request = rows[0];
+    const request = rows;
     if (!request) {
       return res.status(404).json({
         success: false,
@@ -2139,7 +2123,7 @@ const upsertDentalChartEntry = async (req, res) => {
     res.json({
       success: true,
       message: 'Dental chart entry saved successfully',
-      data: rows[0]
+      data: rows
     });
   } catch (error) {
     console.error('Upsert dental chart entry error:', error);
@@ -2351,7 +2335,7 @@ const upsertDentalChartCustomEntry = async (req, res) => {
     res.json({
       success: true,
       message: 'Custom dental chart entry saved successfully',
-      data: rows[0]
+      data: rows
     });
   } catch (error) {
     console.error('Upsert custom dental chart entry error:', error);
@@ -2447,7 +2431,7 @@ const listDentalChartVersions = async (req, res) => {
        ${whereClause}`,
       params
     );
-    const total = Number(countRows[0]?.total || 0);
+    const total = Number(countRows?.total || 0);
 
     const rows = await query(
       `SELECT v.id, v.patient_id, v.version_label, v.entry_count, v.snapshot_data,
@@ -2539,7 +2523,7 @@ const createDentalChartVersion = async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Dental chart version saved successfully',
-      data: normalizeDentalChartVersionRow(savedRows[0] || null)
+      data: normalizeDentalChartVersionRow(savedRows || null)
     });
   } catch (error) {
     console.error('Create dental chart version error:', error);
@@ -2577,7 +2561,7 @@ const downloadDentalChartVersion = async (req, res) => {
        LIMIT 1`,
       [versionId, patientId]
     );
-    const version = normalizeDentalChartVersionRow(rows[0] || null);
+    const version = normalizeDentalChartVersionRow(rows || null);
     if (!version) {
       return res.status(404).json({
         success: false,
@@ -2677,7 +2661,7 @@ const exportPatientRecordPdf = async (req, res) => {
       )
     ]);
 
-    const historyRow = historyRows[0] || null;
+    const historyRow = historyRows || null;
     let historyData = {};
     if (historyRow?.form_data && typeof historyRow.form_data === 'object') {
       historyData = historyRow.form_data;
@@ -2781,7 +2765,7 @@ const deleteDentalChartVersion = async (req, res) => {
        LIMIT 1`,
       [versionId, patientId]
     );
-    const existingVersion = rows[0];
+    const existingVersion = rows;
     if (!existingVersion) {
       return res.status(404).json({
         success: false,
@@ -2858,7 +2842,7 @@ const restoreDentalChartVersion = async (req, res) => {
        LIMIT 1`,
       [versionId, patientId]
     );
-    const existingVersion = rows[0];
+    const existingVersion = rows;
     if (!existingVersion) {
       return res.status(404).json({
         success: false,
@@ -2924,7 +2908,7 @@ const getPatientHistory = async (req, res) => {
       date_of_examination: patient.created_at ? String(patient.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10)
     };
 
-    const row = historyRows[0] || null;
+    const row = historyRows || null;
     let normalizedHistory = {};
     if (row?.form_data && typeof row.form_data === 'object') {
       normalizedHistory = row.form_data;
@@ -2993,7 +2977,7 @@ const upsertPatientHistory = async (req, res) => {
         [patientId]
       );
       let existingForm = {};
-      const existing = existingRows[0];
+      const existing = existingRows;
       if (existing?.form_data && typeof existing.form_data === 'object') {
         existingForm = existing.form_data;
       } else if (typeof existing?.form_data === 'string') {
@@ -3036,7 +3020,7 @@ const upsertPatientHistory = async (req, res) => {
       [patientId]
     );
 
-    const saved = rows[0] || null;
+    const saved = rows || null;
     let normalizedFormData = {};
     if (saved?.form_data && typeof saved.form_data === 'object') {
       normalizedFormData = saved.form_data;
