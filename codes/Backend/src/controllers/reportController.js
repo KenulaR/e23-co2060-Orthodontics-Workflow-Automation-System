@@ -185,7 +185,11 @@ const getVisitSummaryReport = async (req, res) => {
       SELECT 
         procedure_type,
         COUNT(*) as count,
-        COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed_count
+        COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed_count,
+        COUNT(CASE WHEN status = 'SCHEDULED' THEN 1 END) as scheduled_count,
+        COUNT(CASE WHEN status = 'CANCELLED' THEN 1 END) as cancelled_count,
+        COUNT(CASE WHEN status = 'DID_NOT_ATTEND' THEN 1 END) as did_not_attend_count,
+        COUNT(CASE WHEN status NOT IN ('COMPLETED', 'SCHEDULED', 'CANCELLED', 'DID_NOT_ATTEND') THEN 1 END) as other_status_count
       FROM visits 
       WHERE 1=1
         ${dateFilterWithoutAlias}
@@ -253,10 +257,10 @@ const getInventoryAlertsReport = async (req, res) => {
         whereClause = 'WHERE i.deleted_at IS NULL AND i.purged_at IS NULL AND i.quantity = 0';
         break;
       case 'low_stock':
-        whereClause = 'WHERE i.deleted_at IS NULL AND i.purged_at IS NULL AND i.quantity <= i.minimum_threshold AND i.quantity > 0';
+        whereClause = 'WHERE i.deleted_at IS NULL AND i.purged_at IS NULL AND i.quantity > i.minimum_threshold / 2 AND i.quantity <= i.minimum_threshold';
         break;
       case 'critical':
-        whereClause = 'WHERE i.deleted_at IS NULL AND i.purged_at IS NULL AND i.quantity <= i.minimum_threshold / 2';
+        whereClause = 'WHERE i.deleted_at IS NULL AND i.purged_at IS NULL AND i.quantity > 0 AND i.quantity <= i.minimum_threshold / 2';
         break;
       default:
         whereClause = 'WHERE i.deleted_at IS NULL AND i.purged_at IS NULL AND i.quantity <= i.minimum_threshold';
@@ -267,7 +271,7 @@ const getInventoryAlertsReport = async (req, res) => {
         i.*,
         CASE 
           WHEN i.quantity = 0 THEN 'OUT_OF_STOCK'
-          WHEN i.quantity <= i.minimum_threshold / 2 THEN 'CRITICAL'
+          WHEN i.quantity > 0 AND i.quantity <= i.minimum_threshold / 2 THEN 'CRITICAL'
           ELSE 'LOW_STOCK'
         END as alert_level,
         (i.minimum_threshold - i.quantity) as shortage_quantity,
@@ -290,8 +294,8 @@ const getInventoryAlertsReport = async (req, res) => {
       SELECT 
         COUNT(*) as total_items,
         COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock_count,
-        COUNT(CASE WHEN quantity <= minimum_threshold AND quantity > 0 THEN 1 END) as low_stock_count,
-        COUNT(CASE WHEN quantity <= minimum_threshold / 2 THEN 1 END) as critical_count,
+        COUNT(CASE WHEN quantity > 0 AND quantity <= minimum_threshold / 2 THEN 1 END) as critical_count,
+        COUNT(CASE WHEN quantity > minimum_threshold / 2 AND quantity <= minimum_threshold THEN 1 END) as low_stock_count,
         COUNT(CASE WHEN quantity > minimum_threshold THEN 1 END) as normal_count,
         SUM(quantity) as total_quantity,
         SUM(CASE WHEN quantity <= minimum_threshold THEN quantity ELSE 0 END) as at_risk_quantity
@@ -308,7 +312,8 @@ const getInventoryAlertsReport = async (req, res) => {
         category,
         COUNT(*) as total_items,
         COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock,
-        COUNT(CASE WHEN quantity <= minimum_threshold THEN 1 END) as low_stock,
+        COUNT(CASE WHEN quantity > 0 AND quantity <= minimum_threshold / 2 THEN 1 END) as critical,
+        COUNT(CASE WHEN quantity > minimum_threshold / 2 AND quantity <= minimum_threshold THEN 1 END) as low_stock,
         SUM(quantity) as total_quantity
       FROM inventory_items
       WHERE deleted_at IS NULL
@@ -400,7 +405,7 @@ const getDashboardReport = async (req, res) => {
         DATE_FORMAT(created_at, '%Y-%m-%d') as date,
         COUNT(*) as new_patients
       FROM patients 
-      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      WHERE created_at >= ${dateFilter}
         AND deleted_at IS NULL
       GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
       ORDER BY date ASC
@@ -415,7 +420,7 @@ const getDashboardReport = async (req, res) => {
         COUNT(*) as visits,
         COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed
       FROM visits 
-      WHERE visit_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      WHERE visit_date >= ${dateFilter}
       GROUP BY DATE_FORMAT(visit_date, '%Y-%m-%d')
       ORDER BY date ASC
     `;
