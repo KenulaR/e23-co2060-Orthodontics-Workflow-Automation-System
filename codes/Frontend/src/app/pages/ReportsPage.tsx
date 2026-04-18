@@ -20,8 +20,21 @@ import { apiService } from '../services/api';
 
 const COLORS = ['#2563eb', '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 const PATIENT_STATUS_ORDER = ['ACTIVE', 'CONSULTATION', 'MAINTENANCE', 'COMPLETED', 'INACTIVE'];
+const PATIENT_CHART_WIDTH = 360;
+const PATIENT_CHART_HEIGHT = 280;
+const PATIENT_CENTER_X = PATIENT_CHART_WIDTH / 2;
+const PATIENT_CENTER_Y = PATIENT_CHART_HEIGHT / 2;
+const PATIENT_OUTER_RADIUS = 82;
 
-const toDateTimeString = (date: Date) => date.toISOString().slice(0, 19).replace('T', ' ');
+const toDateTimeString = (date: Date) => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+};
 
 const getDateRange = (period: '24h' | '7d' | '30d' | '3m' | '6m' | '12m') => {
   const end = new Date();
@@ -47,12 +60,83 @@ const getDateRange = (period: '24h' | '7d' | '30d' | '3m' | '6m' | '12m') => {
   };
 };
 
+const renderProcedureTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+
+  const row = payload[0]?.payload;
+  if (!row) return null;
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+      <p className="text-sm font-semibold text-gray-900">{label}</p>
+      <div className="mt-2 space-y-1 text-xs text-gray-600">
+        <p>Completed: {row.completed_count}</p>
+        <p>Scheduled: {row.scheduled_count}</p>
+        <p>Cancelled: {row.cancelled_count}</p>
+        <p>Did Not Attend: {row.did_not_attend_count}</p>
+        {row.other_status_count > 0 && <p>Other: {row.other_status_count}</p>}
+      </div>
+    </div>
+  );
+};
+
+const renderPatientSliceLabel = ({ cx, cy, midAngle, outerRadius, value }: any) => {
+  const angle = (-midAngle * Math.PI) / 180;
+  const lineStartRadius = outerRadius + 4;
+  const lineBendRadius = outerRadius + 18;
+  const lineEndOffset = 18;
+
+  const startX = cx + lineStartRadius * Math.cos(angle);
+  const startY = cy + lineStartRadius * Math.sin(angle);
+  const bendX = cx + lineBendRadius * Math.cos(angle);
+  const bendY = cy + lineBendRadius * Math.sin(angle);
+  const endX = bendX + (bendX >= cx ? lineEndOffset : -lineEndOffset);
+  const endY = bendY;
+  const textX = endX + (endX >= cx ? 4 : -4);
+
+  return (
+    <g>
+      <path
+        d={`M ${startX} ${startY} L ${bendX} ${bendY} L ${endX} ${endY}`}
+        fill="none"
+        stroke="#9ca3af"
+        strokeWidth={1}
+      />
+      <circle cx={endX} cy={endY} r={2} fill="#9ca3af" />
+      <text
+        x={textX}
+        y={endY}
+        fill="#4b5563"
+        textAnchor={endX >= cx ? 'start' : 'end'}
+        dominantBaseline="central"
+        fontSize={12}
+        fontWeight={600}
+      >
+        {value}
+      </text>
+    </g>
+  );
+};
+
+const getPatientTooltipPosition = (midAngle: number) => {
+  const angle = (-midAngle * Math.PI) / 180;
+  const radius = PATIENT_OUTER_RADIUS + 54;
+  const rawX = PATIENT_CENTER_X + radius * Math.cos(angle);
+  const rawY = PATIENT_CENTER_Y + radius * Math.sin(angle);
+
+  return {
+    left: Math.min(Math.max(rawX, 70), PATIENT_CHART_WIDTH - 70),
+    top: Math.min(Math.max(rawY, 44), PATIENT_CHART_HEIGHT - 44),
+  };
+};
+
 export function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [patient, setPatient] = useState<any>(null);
   const [visits, setVisits] = useState<any>(null);
   const [inventory, setInventory] = useState<any>(null);
+  const [activePatientTooltip, setActivePatientTooltip] = useState<any>(null);
   const [period, setPeriod] = useState<'24h' | '7d' | '30d' | '3m' | '6m' | '12m'>('30d');
   const [alertType, setAlertType] = useState<'all' | 'critical' | 'low_stock' | 'out_of_stock'>('all');
 
@@ -112,6 +196,22 @@ export function ReportsPage() {
     }));
   }, [patient]);
 
+  const patientChartData = useMemo(() => {
+    const total = patientBreakdown.reduce((sum: number, row: any) => sum + row.value, 0);
+    let currentAngle = 90;
+
+    return patientBreakdown.map((row: any) => {
+      const sweep = total > 0 ? (row.value / total) * 360 : 0;
+      const midAngle = currentAngle - sweep / 2;
+      currentAngle -= sweep;
+
+      return {
+        ...row,
+        midAngle,
+      };
+    });
+  }, [patientBreakdown]);
+
   const visitTrends = useMemo(
     () =>
       (visits?.trends || [])
@@ -135,6 +235,10 @@ export function ReportsPage() {
           count,
           completed_count: completed,
           pending_count: pending,
+          scheduled_count: Number(row.scheduled_count || 0),
+          cancelled_count: Number(row.cancelled_count || 0),
+          did_not_attend_count: Number(row.did_not_attend_count || 0),
+          other_status_count: Number(row.other_status_count || 0),
           completion_rate: count > 0 ? Number(((completed / count) * 100).toFixed(1)) : 0
         };
       }),
@@ -143,7 +247,10 @@ export function ReportsPage() {
 
   const inventoryAlerts = inventory?.alerts || [];
   const inventoryOverview = inventory?.overview || {};
-  const totalInventoryAlerts = Number(inventoryOverview.out_of_stock_count || 0) + Number(inventoryOverview.low_stock_count || 0);
+  const totalInventoryAlerts =
+    Number(inventoryOverview.out_of_stock_count || 0) +
+    Number(inventoryOverview.critical_count || 0) +
+    Number(inventoryOverview.low_stock_count || 0);
 
   return (
     <div className="space-y-6">
@@ -224,24 +331,67 @@ export function ReportsPage() {
 
         <Card className="p-6">
           <h4 className="font-bold mb-4">Patient Status Distribution</h4>
-          <div className="h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={patientBreakdown} cx="50%" cy="50%" outerRadius={85} dataKey="value" nameKey="label" label>
-                  {patientBreakdown.map((_: any, idx: number) => <Cell key={idx} fill={COLORS[idx % COLORS.length]} />)}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="mt-2 space-y-1">
-            {patientBreakdown.map((status: any) => (
-              <div key={status.name} className="flex justify-between text-xs text-gray-600">
-                <span>{status.label}</span>
-                <span>{status.value} ({status.percentage}%)</span>
+          <div className="space-y-4">
+            <div className="relative mx-auto h-[280px] w-full max-w-[360px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={patientChartData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={52}
+                    outerRadius={82}
+                    paddingAngle={3}
+                    dataKey="value"
+                    nameKey="label"
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                    label={renderPatientSliceLabel}
+                    labelLine={false}
+                    startAngle={90}
+                    endAngle={-270}
+                    onMouseEnter={(_: any, index: number) => {
+                      const row = patientChartData[index];
+                      if (!row) return;
+                      setActivePatientTooltip({
+                        ...row,
+                        ...getPatientTooltipPosition(row.midAngle),
+                      });
+                    }}
+                    onMouseLeave={() => setActivePatientTooltip(null)}
+                  >
+                    {patientChartData.map((_: any, idx: number) => <Cell key={idx} fill={COLORS[idx % COLORS.length]} />)}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Patients</p>
+                <p className="text-2xl font-bold text-gray-900">{patient?.overview?.total_patients ?? 0}</p>
               </div>
-            ))}
+              {activePatientTooltip && (
+                <div
+                  className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
+                  style={{ left: activePatientTooltip.left, top: activePatientTooltip.top }}
+                >
+                  <p className="text-sm font-semibold text-gray-900">{activePatientTooltip.label}</p>
+                  <div className="mt-2 space-y-1 text-xs text-gray-600">
+                    <p>Count: {activePatientTooltip.value}</p>
+                    <p>Percentage: {activePatientTooltip.percentage}%</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+              {patientChartData.map((status: any, idx: number) => (
+                <div key={status.name} className="flex items-center gap-2 text-sm text-gray-700">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: COLORS[idx % COLORS.length] }}
+                  />
+                  <span className="font-medium">{status.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </Card>
       </div>
@@ -254,18 +404,23 @@ export function ReportsPage() {
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
               <XAxis dataKey="procedure_type" axisLine={false} tickLine={false} />
               <YAxis axisLine={false} tickLine={false} />
-              <Tooltip />
+              <Tooltip content={renderProcedureTooltip} />
               <Legend />
               <Bar dataKey="completed_count" stackId="visits" fill="#10b981" radius={[4, 4, 0, 0]} name="Completed" />
-              <Bar dataKey="pending_count" stackId="visits" fill="#6366f1" radius={[4, 4, 0, 0]} name="Other statuses" />
+              <Bar dataKey="pending_count" stackId="visits" fill="#6366f1" radius={[4, 4, 0, 0]} name="Not completed" />
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="mt-3 space-y-1">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {procedureBreakdown.slice(0, 5).map((procedure: any) => (
-            <div key={procedure.procedure_type} className="flex justify-between text-xs text-gray-600">
-              <span>{procedure.procedure_type}</span>
-              <span>{procedure.completion_rate}% completed</span>
+            <div key={procedure.procedure_type} className="rounded-lg border border-gray-100 px-3 py-3 text-center">
+              <p className="text-sm font-medium text-gray-900">{procedure.procedure_type}</p>
+              <p className="mt-1 text-xs text-gray-500">{procedure.completion_rate}% completed</p>
+              <p className="mt-2 text-xs font-medium text-gray-700">Not completed: {procedure.pending_count}</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Scheduled {procedure.scheduled_count} | Cancelled {procedure.cancelled_count} | DNA {procedure.did_not_attend_count}
+              </p>
+              <p className="mt-1 text-xs text-gray-400">Other {procedure.other_status_count}</p>
             </div>
           ))}
         </div>
@@ -284,7 +439,7 @@ export function ReportsPage() {
             <div key={a.id} className="flex justify-between items-center p-3 border border-gray-100 rounded-lg">
               <div>
                 <p className="font-medium text-gray-900">{a.name}</p>
-                <p className="text-xs text-gray-500">{a.category} • Qty: {a.quantity} / Min: {a.minimum_threshold}</p>
+                <p className="text-xs text-gray-500">{a.category} | Qty: {a.quantity} / Min: {a.minimum_threshold}</p>
               </div>
               <Badge variant={a.alert_level === 'OUT_OF_STOCK' ? 'error' : a.alert_level === 'CRITICAL' ? 'warning' : 'blue'}>{a.alert_level}</Badge>
             </div>
