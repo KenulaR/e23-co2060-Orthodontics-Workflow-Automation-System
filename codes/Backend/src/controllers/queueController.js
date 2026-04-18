@@ -94,6 +94,17 @@ const queueController = {
         try {
             const queueId = req.params.id;
             const { status } = req.body;
+            const userRole = req.user?.role;
+
+            // Restrict "Done" status to ADMIN, ORTHODONTIST, DENTAL_SURGEON only
+            const restrictedRoles = ['NURSE', 'STUDENT', 'RECEPTION'];
+            if (status === 'Treatments are done / Done' && restrictedRoles.includes(userRole)) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Your role (${userRole}) cannot mark treatments as done. Only Admin, Orthodontist, or Dental Surgeon can do this.`
+                });
+            }
+
             await pool.query('UPDATE queue SET status = ? WHERE id = ?', [status, queueId]);
             res.status(200).json({ success: true, message: `Status updated to ${status}` });
         } catch (error) {

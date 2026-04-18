@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 export function ClinicQueuePage() {
-  const [queueData, setQueueData] = useState([]);
+  const [queueData, setQueueData] = useState<any[]>([]);
   const [patientsList, setPatientsList] = useState<any[]>([]);
   const [stats, setStats] = useState({ inTreatment: 0, waiting: 0, done: 0, totalToday: 0 });
   const [isLoading, setIsLoading] = useState(true);
@@ -60,45 +60,9 @@ export function ClinicQueuePage() {
 
   const fetchPatientsList = async () => {
     try {
-      // ⚠️ FIX: Pointed specifically to the queue's dedicated patient endpoint
       const response = await fetch('http://localhost:3000/api/queue/patients', {
         headers: getAuthHeaders()
       });
-      const result = await response.json();
-
-      if (result.success && Array.isArray(result.data)) {
-        setPatientsList(result.data);
-      } else {
-        console.error("Unexpected data format from backend:", result);
-        setPatientsList([]);
-      }
-    } catch (error) {
-      console.error("Failed to fetch patients list:", error);
-      setPatientsList([]);
-    }
-  };
-
-  useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        setCurrentUserRole(user.role || '');
-      } catch {
-        console.error("Failed to parse user session");
-      }
-    }
-
-    fetchClinicBoard();
-    fetchPatientsList();
-
-    const interval = setInterval(fetchClinicBoard, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchPatientsList = async () => {
-    try {
-      const response = await fetch('http://localhost:3000/api/queue/patients');
       const result = await response.json();
 
       if (result.success && Array.isArray(result.data)) {
@@ -224,7 +188,6 @@ export function ClinicQueuePage() {
             </button>
           )}
         </div>
-      ))}
 
         <div className="divide-y divide-slate-100">
           {queueData.map((item: any) => (
@@ -260,16 +223,20 @@ export function ClinicQueuePage() {
                 <select
                   value={item.status}
                   onChange={(e) => updatePatientStatus(item.queue_id, e.target.value)}
-                  className={`border-none rounded-full px-4 py-2 text-sm font-semibold cursor-pointer outline-none ring-1 ring-inset 
+                  className={`border-none rounded-full px-4 py-2 text-sm font-semibold outline-none ring-1 ring-inset 
                     ${item.status === 'In waiting room'           ? 'bg-yellow-50 text-yellow-700 ring-yellow-200' : ''}
                     ${item.status === 'under consultation'        ? 'bg-purple-50 text-purple-700 ring-purple-200' : ''}
                     ${item.status === 'under treatment'           ? 'bg-blue-50   text-blue-700   ring-blue-200'   : ''}
-                    ${item.status === 'Treatments are done / Done'? 'bg-green-50  text-green-700  ring-green-200'  : ''}`}
+                    ${item.status === 'Treatments are done / Done'? 'bg-green-50  text-green-700  ring-green-200'  : ''}
+                    ${['NURSE', 'STUDENT', 'RECEPTION'].includes(currentUserRole) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                  disabled={['NURSE', 'STUDENT', 'RECEPTION'].includes(currentUserRole)}
                 >
                   <option value="In waiting room">In waiting room</option>
                   <option value="under consultation">Under consultation</option>
                   <option value="under treatment">Under treatment</option>
-                  <option value="Treatments are done / Done">Done</option>
+                  {!['NURSE', 'STUDENT', 'RECEPTION'].includes(currentUserRole) && (
+                    <option value="Treatments are done / Done">Done</option>
+                  )}
                 </select>
               </div>
             </div>
