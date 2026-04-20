@@ -13,8 +13,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  LineChart,
-  Line,
 } from 'recharts';
 import { apiService } from '../services/api';
 
@@ -25,6 +23,8 @@ const PATIENT_CHART_HEIGHT = 280;
 const PATIENT_CENTER_X = PATIENT_CHART_WIDTH / 2;
 const PATIENT_CENTER_Y = PATIENT_CHART_HEIGHT / 2;
 const PATIENT_OUTER_RADIUS = 82;
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const VISIT_BAR_DEFAULT = '#2563eb';
 
 const toDateTimeString = (date: Date) => {
   const yyyy = date.getFullYear();
@@ -130,6 +130,93 @@ const getPatientTooltipPosition = (midAngle: number) => {
   };
 };
 
+const getVisitGroupBy = (period: '24h' | '7d' | '30d' | '3m' | '6m' | '12m') => {
+  if (period === '24h') return 'hour';
+  if (period === '7d') return 'day';
+  if (period === '30d' || period === '3m') return 'week';
+  return 'month';
+};
+
+const parseDateOnly = (value: string) => {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+};
+
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const addDays = (date: Date, amount: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+};
+
+const addMonths = (date: Date, amount: number) => {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + amount);
+  return next;
+};
+
+const startOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+
+const startOfWeek = (date: Date) => {
+  const next = startOfDay(date);
+  const weekday = (next.getDay() + 6) % 7;
+  next.setDate(next.getDate() - weekday);
+  return next;
+};
+
+const formatDateKey = (date: Date) => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const formatMonthKey = (date: Date) => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  return `${yyyy}-${mm}`;
+};
+
+const formatHourLabel = (hour: number) => {
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${displayHour} ${suffix}`;
+};
+
+const formatWeekLabel = (weekStartKey: string) => {
+  const start = parseDateOnly(weekStartKey);
+  const end = addDays(start, 6);
+  if (start.getMonth() === end.getMonth()) {
+    return `${MONTH_LABELS[start.getMonth()]} ${start.getDate()}-${end.getDate()}`;
+  }
+  return `${MONTH_LABELS[start.getMonth()]} ${start.getDate()}-${MONTH_LABELS[end.getMonth()]} ${end.getDate()}`;
+};
+
+const formatMonthLabel = (monthKey: string, period: '24h' | '7d' | '30d' | '3m' | '6m' | '12m') => {
+  const [year, month] = monthKey.split('-').map(Number);
+  if (!year || !month) return monthKey;
+  return period === '12m' ? `${MONTH_LABELS[month - 1]} ${year}` : MONTH_LABELS[month - 1];
+};
+
+const renderVisitTrendTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+
+  const row = payload[0]?.payload;
+  if (!row) return null;
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+      <p className="text-sm font-semibold text-gray-900">{row.fullLabel || label}</p>
+      <div className="mt-2 space-y-1 text-xs text-gray-600">
+        <p>Patient visits: {row.total}</p>
+        <p>Completed visits: {row.completed}</p>
+        <p>Not completed: {row.notCompleted}</p>
+      </div>
+    </div>
+  );
+};
+
 export function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -142,7 +229,7 @@ export function ReportsPage() {
 
   const loadReports = async () => {
     const dateRange = getDateRange(period);
-    const visitGroupBy = period === '24h' || period === '7d' ? 'day' : period === '30d' ? 'week' : 'month';
+    const visitGroupBy = getVisitGroupBy(period);
     setLoading(true);
     setError(null);
     const [p, v, i] = await Promise.allSettled([
@@ -213,15 +300,112 @@ export function ReportsPage() {
   }, [patientBreakdown]);
 
   const visitTrends = useMemo(
-    () =>
-      (visits?.trends || [])
-        .map((r: any) => ({
-          name: String(r.group_key),
-          total: Number(r.total_visits || 0),
-          completed: Number(r.completed_visits || 0)
-        }))
-        .reverse(),
-    [visits]
+    () => {
+      const rows = visits?.trends || [];
+      const totalsByKey = new Map<string, { total: number; completed: number }>();
+
+      for (const row of rows) {
+        totalsByKey.set(String(row.group_key), {
+          total: Number(row.total_visits || 0),
+          completed: Number(row.completed_visits || 0),
+        });
+      }
+
+      const range = getDateRange(period);
+      const rangeStart = new Date(range.start_date.replace(' ', 'T'));
+      const rangeEnd = new Date(range.end_date.replace(' ', 'T'));
+      const buckets: Array<{ rawKey: string; name: string; fullLabel: string; total: number; completed: number; notCompleted: number; color: string }> = [];
+
+      if (period === '24h') {
+        const businessHours: Date[] = [];
+        let cursor = new Date(rangeStart);
+        cursor.setMinutes(0, 0, 0);
+
+        while (cursor <= rangeEnd) {
+          const hour = cursor.getHours();
+          if (hour >= 8 && hour <= 17) {
+            businessHours.push(new Date(cursor));
+          }
+          cursor.setHours(cursor.getHours() + 1, 0, 0, 0);
+        }
+
+        for (const slot of businessHours) {
+          const key = `${formatDateKey(slot)} ${String(slot.getHours()).padStart(2, '0')}:00:00`;
+          const totals = totalsByKey.get(key) || { total: 0, completed: 0 };
+          buckets.push({
+            rawKey: key,
+            name: formatHourLabel(slot.getHours()),
+            fullLabel: `${MONTH_LABELS[slot.getMonth()]} ${slot.getDate()}, ${slot.getFullYear()} ${formatHourLabel(slot.getHours())}`,
+            total: totals.total,
+            completed: totals.completed,
+            notCompleted: Math.max(0, totals.total - totals.completed),
+            color: VISIT_BAR_DEFAULT,
+          });
+        }
+        return buckets;
+      }
+
+      if (period === '7d') {
+        let cursor = addDays(startOfDay(rangeEnd), -6);
+        const end = startOfDay(rangeEnd);
+        while (cursor <= end) {
+          const key = formatDateKey(cursor);
+          const totals = totalsByKey.get(key) || { total: 0, completed: 0 };
+          buckets.push({
+            rawKey: key,
+            name: `${MONTH_LABELS[cursor.getMonth()]} ${cursor.getDate()}`,
+            fullLabel: `${MONTH_LABELS[cursor.getMonth()]} ${cursor.getDate()}, ${cursor.getFullYear()}`,
+            total: totals.total,
+            completed: totals.completed,
+            notCompleted: Math.max(0, totals.total - totals.completed),
+            color: VISIT_BAR_DEFAULT,
+          });
+          cursor = addDays(cursor, 1);
+        }
+        return buckets;
+      }
+
+      if (period === '30d' || period === '3m') {
+        const weeksToShow = period === '30d' ? 4 : 12;
+        let cursor = startOfWeek(addDays(rangeEnd, -((weeksToShow - 1) * 7)));
+        const lastWeek = startOfWeek(rangeEnd);
+        while (cursor <= lastWeek) {
+          const key = formatDateKey(cursor);
+          const totals = totalsByKey.get(key) || { total: 0, completed: 0 };
+          buckets.push({
+            rawKey: key,
+            name: formatWeekLabel(key),
+            fullLabel: `Week of ${formatWeekLabel(key)}`,
+            total: totals.total,
+            completed: totals.completed,
+            notCompleted: Math.max(0, totals.total - totals.completed),
+            color: VISIT_BAR_DEFAULT,
+          });
+          cursor = addDays(cursor, 7);
+        }
+        return buckets;
+      }
+
+      const monthsToShow = period === '6m' ? 6 : 12;
+      let cursor = startOfMonth(addMonths(rangeEnd, -(monthsToShow - 1)));
+      const lastMonth = startOfMonth(rangeEnd);
+      while (cursor <= lastMonth) {
+        const key = formatMonthKey(cursor);
+        const totals = totalsByKey.get(key) || { total: 0, completed: 0 };
+        buckets.push({
+          rawKey: key,
+          name: formatMonthLabel(key, period),
+          fullLabel: `${formatMonthLabel(key, '12m')}`,
+          total: totals.total,
+          completed: totals.completed,
+          notCompleted: Math.max(0, totals.total - totals.completed),
+          color: VISIT_BAR_DEFAULT,
+        });
+        cursor = addMonths(cursor, 1);
+      }
+      return buckets;
+    },
+    [visits, period]
   );
 
   const procedureBreakdown = useMemo(
@@ -313,18 +497,33 @@ export function ReportsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 p-6">
-          <h4 className="font-bold mb-4">Visit Trend</h4>
+          <div className="mb-4">
+            <h4 className="font-bold text-gray-900">Visit Trend</h4>
+          </div>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={visitTrends}>
+              <BarChart data={visitTrends} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                <YAxis axisLine={false} tickLine={false} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="total" stroke="#2563eb" strokeWidth={2} />
-                <Line type="monotone" dataKey="completed" stroke="#10b981" strokeWidth={2} />
-              </LineChart>
+                <XAxis
+                  dataKey="name"
+                  axisLine={false}
+                  tickLine={false}
+                  minTickGap={period === '3m' ? 12 : 20}
+                  tick={{ fontSize: 12, fill: '#6b7280' }}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  allowDecimals={false}
+                  tick={{ fontSize: 12, fill: '#6b7280' }}
+                />
+                <Tooltip content={renderVisitTrendTooltip} />
+                <Bar dataKey="total" radius={[6, 6, 0, 0]} name="Patient visits">
+                  {visitTrends.map((entry: any) => (
+                    <Cell key={entry.rawKey} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </Card>
