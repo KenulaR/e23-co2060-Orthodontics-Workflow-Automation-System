@@ -137,11 +137,14 @@ const getVisitSummaryReport = async (req, res) => {
 
     let groupByClause;
     switch (group_by) {
+      case 'hour':
+        groupByClause = 'DATE_FORMAT(visit_date, "%Y-%m-%d %H:00:00")';
+        break;
       case 'month':
         groupByClause = 'DATE_FORMAT(visit_date, "%Y-%m")';
         break;
       case 'week':
-        groupByClause = 'YEARWEEK(visit_date)';
+        groupByClause = 'DATE_FORMAT(DATE_SUB(visit_date, INTERVAL WEEKDAY(visit_date) DAY), "%Y-%m-%d")';
         break;
       case 'day':
         groupByClause = 'DATE(visit_date)';
