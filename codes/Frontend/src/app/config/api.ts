@@ -116,6 +116,7 @@ export const API_ENDPOINTS = {
   // Queue
   QUEUE: {
     LIST: '/api/queue',
+    PATIENTS: '/api/queue/patients',
     DETAIL: (id: string) => `/api/queue/${id}`,
     UPDATE: (id: string) => `/api/queue/${id}/status`,
     DELETE: (id: string) => `/api/queue/${id}`,

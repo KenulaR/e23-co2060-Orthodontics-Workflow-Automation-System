@@ -95,10 +95,46 @@ const verifyGoogleIdToken = async (idToken) => {
 // Login controller
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const rawEmail = req.body?.email;
+    const password = req.body?.password;
+    const email = String(rawEmail || '').trim().toLowerCase();
 
     // Find user by email
-    const user = await findOne('users', { email });
+    let user = await findOne('users', { email });
+
+    // Dev-only: bootstrap seeded admin if database is empty/unseeded.
+    // This prevents lockouts in local/dev setups when seeding wasn't executed.
+    if (
+      !user &&
+      process.env.NODE_ENV !== 'production' &&
+      process.env.SEED_ADMIN_EMAIL &&
+      process.env.SEED_ADMIN_PASSWORD
+    ) {
+      const seedEmail = String(process.env.SEED_ADMIN_EMAIL).trim().toLowerCase();
+      const seedPassword = String(process.env.SEED_ADMIN_PASSWORD).trim();
+
+      if (email && email === seedEmail && seedPassword) {
+        const seededAt = new Date();
+        const adminName = String(process.env.SEED_ADMIN_NAME || 'System Administrator').trim();
+        const adminDepartment = String(process.env.SEED_ADMIN_DEPARTMENT || 'Orthodontics').trim();
+
+        const passwordHash = bcrypt.hashSync(seedPassword, 12);
+        const insertedId = await insert('users', {
+          name: adminName,
+          email: seedEmail,
+          password_hash: passwordHash,
+          role: 'ADMIN',
+          department: adminDepartment || null,
+          status: 'ACTIVE',
+          must_change_password: false,
+          password_changed_at: seededAt,
+          last_login: null,
+          last_activity_at: null
+        });
+
+        user = await findOne('users', { id: insertedId });
+      }
+    }
     
     if (!user) {
       return res.status(401).json({
@@ -116,7 +152,31 @@ const login = async (req, res) => {
     }
 
     // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    let isPasswordValid = await bcrypt.compare(password, user.password_hash);
+
+    // Dev-only: if a seeded admin exists but DB password differs from current env,
+    // allow login with SEED_ADMIN_PASSWORD by rotating the stored hash.
+    if (
+      !isPasswordValid &&
+      process.env.NODE_ENV !== 'production' &&
+      user?.role === 'ADMIN' &&
+      process.env.SEED_ADMIN_EMAIL &&
+      process.env.SEED_ADMIN_PASSWORD
+    ) {
+      const seedEmail = String(process.env.SEED_ADMIN_EMAIL).trim().toLowerCase();
+      const seedPassword = String(process.env.SEED_ADMIN_PASSWORD).trim();
+
+      if (email && email === seedEmail && password === seedPassword && seedPassword) {
+        const newHash = bcrypt.hashSync(seedPassword, 12);
+        await update(
+          'users',
+          { password_hash: newHash, must_change_password: false, password_changed_at: new Date() },
+          { id: user.id }
+        );
+        user = await findOne('users', { id: user.id });
+        isPasswordValid = true;
+      }
+    }
     
     if (!isPasswordValid) {
       return res.status(401).json({

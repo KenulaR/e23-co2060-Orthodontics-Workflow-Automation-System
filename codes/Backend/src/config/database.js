@@ -390,6 +390,57 @@ const ensureAccessControlSchema = async () => {
     await query('ALTER TABLE payment_records ADD COLUMN deleted_by INT NULL DEFAULT NULL AFTER deleted_at');
   }
 
+  const queueTables = await query(`
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'queue'
+    LIMIT 1
+  `);
+
+  if (queueTables.length) {
+    const queueColumns = await query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'queue'
+    `);
+    const queueColumnSet = new Set(queueColumns.map((row) => row.COLUMN_NAME));
+
+    if (!queueColumnSet.has('bay')) {
+      await query('ALTER TABLE queue ADD COLUMN bay VARCHAR(20) NULL AFTER student_id');
+    }
+
+    const queueStatusColumns = await query(`
+      SELECT COLUMN_TYPE
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'queue'
+        AND COLUMN_NAME = 'status'
+      LIMIT 1
+    `);
+    const queueStatusColumnType = queueStatusColumns[0]?.COLUMN_TYPE || '';
+
+    if (queueStatusColumnType && !queueStatusColumnType.includes('In waiting room')) {
+      await query(`ALTER TABLE queue MODIFY COLUMN status VARCHAR(64) NULL DEFAULT 'In waiting room'`);
+      await query(`
+        UPDATE queue
+        SET status = CASE status
+          WHEN 'WAITING' THEN 'In waiting room'
+          WHEN 'PREPARATION' THEN 'under consultation'
+          WHEN 'IN_TREATMENT' THEN 'under treatment'
+          WHEN 'COMPLETED' THEN 'Treatments are done / Done'
+          ELSE status
+        END
+      `);
+      await query(`
+        ALTER TABLE queue
+        MODIFY COLUMN status ENUM('In waiting room', 'under consultation', 'under treatment', 'Treatments are done / Done')
+        DEFAULT 'In waiting room'
+      `);
+    }
+  }
+
   const clinicalNoteColumns = await query(`
     SELECT COLUMN_NAME
     FROM INFORMATION_SCHEMA.COLUMNS

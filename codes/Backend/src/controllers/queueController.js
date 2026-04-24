@@ -1,376 +1,262 @@
-const { 
-  findOne, 
-  findMany, 
-  insert, 
-  update, 
-  remove,
-  query
-} = require('../config/database');
-const { logAuditEvent } = require('../middleware/errorHandler');
+const { query, remove } = require('../config/database');
 
-// Get current queue
-const getQueue = async (req, res) => {
-  try {
-    const { status, priority } = req.query;
+const QUEUE_STATUS = {
+  WAITING: 'In waiting room',
+  CONSULTATION: 'under consultation',
+  TREATMENT: 'under treatment',
+  DONE: 'Treatments are done / Done'
+};
 
-    let whereClause = 'WHERE q.status != "COMPLETED"';
-    let queryParams = [];
+const ACTIVE_QUEUE_STATUSES = [
+  QUEUE_STATUS.WAITING,
+  QUEUE_STATUS.CONSULTATION,
+  QUEUE_STATUS.TREATMENT
+];
 
-    if (status) {
-      whereClause += ' AND q.status = ?';
-      queryParams.push(status);
+const buildStats = (items) => {
+  const inTreatment = items.filter(
+    (item) => item.status === QUEUE_STATUS.TREATMENT || item.status === QUEUE_STATUS.CONSULTATION
+  ).length;
+  const waiting = items.filter((item) => item.status === QUEUE_STATUS.WAITING).length;
+  const done = items.filter((item) => item.status === QUEUE_STATUS.DONE).length;
+  const totalToday = items.length;
+
+  return {
+    inTreatment,
+    waiting,
+    done,
+    totalToday,
+    statistics: {
+      in_treatment_count: inTreatment,
+      waiting_count: waiting,
+      completed_count: done,
+      total_today: totalToday
     }
+  };
+};
 
-    if (priority) {
-      whereClause += ' AND q.priority = ?';
-      queryParams.push(priority);
-    }
-
-    const queueQuery = `
-      SELECT 
-        q.*,
+const getTodayQueueItems = async () => {
+  return query(
+    `
+      SELECT
+        q.id AS queue_id,
+        q.status,
+        q.bay,
+        q.arrival_time,
+        q.start_time,
+        q.completion_time,
+        p.id AS patient_id,
         p.patient_code,
-        CONCAT(p.first_name, ' ', p.last_name) as patient_name,
-        TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) as patient_age,
-        p.gender as patient_gender,
-        provider.name as provider_name,
-        provider.role as provider_role,
-        student.name as student_name
+        CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
+        s.id AS student_id,
+        s.name AS student_name
       FROM queue q
-      LEFT JOIN patients p ON q.patient_id = p.id
-      LEFT JOIN users provider ON q.provider_id = provider.id
-      LEFT JOIN users student ON q.student_id = student.id
-      ${whereClause}
-      ORDER BY 
-        CASE q.priority 
-          WHEN 'URGENT' THEN 1
-          WHEN 'HIGH' THEN 2
-          WHEN 'NORMAL' THEN 3
-          WHEN 'LOW' THEN 4
-        END,
+      JOIN patients p ON q.patient_id = p.id
+      LEFT JOIN users s ON q.student_id = s.id
+      WHERE DATE(q.arrival_time) = CURDATE()
+        AND p.deleted_at IS NULL
+      ORDER BY
+        FIELD(q.status, ?, ?, ?, ?),
         q.arrival_time ASC
-    `;
-
-    const queue = await query(queueQuery, queryParams);
-
-    // Calculate wait times
-    const queueWithWaitTimes = queue.map(item => ({
-      ...item,
-      wait_time_minutes: item.start_time ? 
-        Math.floor((new Date(item.start_time) - new Date(item.arrival_time)) / 60000) :
-        Math.floor((new Date() - new Date(item.arrival_time)) / 60000),
-      treatment_duration_minutes: item.start_time && item.completion_time ?
-        Math.floor((new Date(item.completion_time) - new Date(item.start_time)) / 60000) :
-        null
-    }));
-
-    // Get queue statistics
-    const statsQuery = `
-      SELECT 
-        COUNT(*) as total_in_queue,
-        COUNT(CASE WHEN status = 'WAITING' THEN 1 END) as waiting_count,
-        COUNT(CASE WHEN status = 'IN_TREATMENT' THEN 1 END) as in_treatment_count,
-        COUNT(CASE WHEN status = 'PREPARATION' THEN 1 END) as preparation_count,
-        COUNT(CASE WHEN priority = 'URGENT' THEN 1 END) as urgent_count,
-        COUNT(CASE WHEN priority = 'HIGH' THEN 1 END) as high_priority_count,
-        AVG(TIMESTAMPDIFF(MINUTE, arrival_time, NOW())) as avg_wait_time
-      FROM queue 
-      WHERE status != 'COMPLETED'
-    `;
-
-    const stats = await query(statsQuery);
-
-    res.json({
-      success: true,
-      data: {
-        queue: queueWithWaitTimes,
-        statistics: stats[0]
-      }
-    });
-  } catch (error) {
-    console.error('Get queue error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
+    `,
+    [
+      QUEUE_STATUS.TREATMENT,
+      QUEUE_STATUS.CONSULTATION,
+      QUEUE_STATUS.WAITING,
+      QUEUE_STATUS.DONE
+    ]
+  );
 };
 
-// Add patient to queue
-const addToQueue = async (req, res) => {
-  try {
-    const queueData = req.body;
+const queueController = {
+  getClinicBoard: async (req, res) => {
+    try {
+      const items = await getTodayQueueItems();
+      const stats = buildStats(items);
 
-    // Check if patient exists
-    const patient = await findOne('patients', { id: queueData.patient_id, deleted_at: null });
-    if (!patient) {
-      return res.status(404).json({
-        success: false,
-        message: 'Patient not found'
+      res.status(200).json({
+        success: true,
+        stats: {
+          inTreatment: stats.inTreatment,
+          waiting: stats.waiting,
+          done: stats.done,
+          totalToday: stats.totalToday
+        },
+        statistics: stats.statistics,
+        data: items
       });
+    } catch (error) {
+      console.error('Error fetching clinic board:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch queue data' });
     }
+  },
 
-    // Check if patient is already in queue
-    const existingInQueue = await findOne('queue', { 
-      patient_id: queueData.patient_id, 
-      status: ['WAITING', 'IN_TREATMENT', 'PREPARATION'] 
-    });
-    
-    if (existingInQueue) {
-      return res.status(400).json({
-        success: false,
-        message: 'Patient is already in queue'
+  getQueueStats: async (req, res) => {
+    try {
+      const items = await getTodayQueueItems();
+      const stats = buildStats(items);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          stats: {
+            inTreatment: stats.inTreatment,
+            waiting: stats.waiting,
+            done: stats.done,
+            totalToday: stats.totalToday
+          },
+          statistics: stats.statistics
+        }
       });
+    } catch (error) {
+      console.error('Error fetching queue stats:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch queue statistics' });
     }
+  },
 
-    // Validate provider and student if provided
-    if (queueData.provider_id) {
-      const provider = await findOne('users', { id: queueData.provider_id, status: 'ACTIVE' });
-      if (!provider) {
-        return res.status(400).json({
+  getAvailablePatients: async (req, res) => {
+    try {
+      const patients = await query(
+        `
+          SELECT p.id, p.patient_code, p.first_name, p.last_name, p.status
+          FROM patients p
+          WHERE p.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM queue q
+              WHERE q.patient_id = p.id
+                AND DATE(q.arrival_time) = CURDATE()
+                AND q.status IN (?, ?, ?)
+            )
+          ORDER BY p.first_name ASC, p.last_name ASC, p.patient_code ASC
+        `,
+        ACTIVE_QUEUE_STATUSES
+      );
+
+      res.status(200).json({ success: true, data: patients });
+    } catch (error) {
+      console.error('Error fetching patients:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch patients' });
+    }
+  },
+
+  registerPatient: async (req, res) => {
+    try {
+      const { patient_id, status, student_id, bay } = req.body;
+      const queueStatus = status || QUEUE_STATUS.WAITING;
+
+      const patients = await query(
+        'SELECT id FROM patients WHERE id = ? AND deleted_at IS NULL LIMIT 1',
+        [patient_id]
+      );
+      if (!patients.length) {
+        return res.status(404).json({ success: false, message: 'Patient not found' });
+      }
+
+      const existingActiveEntries = await query(
+        `
+          SELECT id, status
+          FROM queue
+          WHERE patient_id = ?
+            AND DATE(arrival_time) = CURDATE()
+            AND status IN (?, ?, ?)
+          LIMIT 1
+        `,
+        [patient_id, ...ACTIVE_QUEUE_STATUSES]
+      );
+
+      if (existingActiveEntries.length) {
+        return res.status(409).json({
           success: false,
-          message: 'Provider not found or inactive'
+          message: 'Patient is already in today\'s active queue'
         });
       }
-    }
 
-    if (queueData.student_id) {
-      const student = await findOne('users', { id: queueData.student_id, status: 'ACTIVE', role: 'STUDENT' });
-      if (!student) {
-        return res.status(400).json({
-          success: false,
-          message: 'Student not found or inactive'
-        });
-      }
-    }
+      const startTimeSql = [QUEUE_STATUS.CONSULTATION, QUEUE_STATUS.TREATMENT].includes(queueStatus)
+        ? 'NOW()'
+        : 'NULL';
+      const completionTimeSql = queueStatus === QUEUE_STATUS.DONE ? 'NOW()' : 'NULL';
 
-    // Add to queue
-    const queueId = await insert('queue', {
-      ...queueData,
-      arrival_time: new Date()
-    });
+      const result = await query(
+        `
+          INSERT INTO queue
+            (patient_id, status, student_id, bay, arrival_time, start_time, completion_time)
+          VALUES
+            (?, ?, ?, ?, NOW(), ${startTimeSql}, ${completionTimeSql})
+        `,
+        [patient_id, queueStatus, student_id || null, bay || null]
+      );
 
-    await logAuditEvent(req.user.id, 'CREATE', 'QUEUE', queueId, null, queueData);
-
-    // Return created queue entry with details
-    const createdQueueQuery = `
-      SELECT 
-        q.*,
-        p.patient_code,
-        CONCAT(p.first_name, ' ', p.last_name) as patient_name,
-        TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) as patient_age,
-        provider.name as provider_name,
-        student.name as student_name
-      FROM queue q
-      LEFT JOIN patients p ON q.patient_id = p.id
-      LEFT JOIN users provider ON q.provider_id = provider.id
-      LEFT JOIN users student ON q.student_id = student.id
-      WHERE q.id = ?
-    `;
-
-    const createdQueue = await query(createdQueueQuery, [queueId]);
-
-    res.status(201).json({
-      success: true,
-      message: 'Patient added to queue successfully',
-      data: createdQueue[0]
-    });
-  } catch (error) {
-    console.error('Add to queue error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// Update queue status
-const updateQueueStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status, notes, provider_id, student_id } = req.body;
-
-    // Check if queue entry exists
-    const existingQueue = await findOne('queue', { id });
-    if (!existingQueue) {
-      return res.status(404).json({
-        success: false,
-        message: 'Queue entry not found'
+      res.status(201).json({
+        success: true,
+        message: 'Patient added to queue',
+        queue_id: result.insertId
       });
+    } catch (error) {
+      console.error('Error registering patient:', error);
+      res.status(500).json({ success: false, message: 'Failed to register patient' });
     }
+  },
 
-    const updateData = { status };
-    
-    if (notes) updateData.notes = notes;
-    if (provider_id) updateData.provider_id = provider_id;
-    if (student_id) updateData.student_id = student_id;
+  updateQueueStatus: async (req, res) => {
+    try {
+      const queueId = req.params.id;
+      const { status } = req.body;
 
-    // Handle timestamps based on status
-    if (status === 'IN_TREATMENT' && existingQueue.status !== 'IN_TREATMENT') {
-      updateData.start_time = new Date();
-    }
-    
-    if (status === 'COMPLETED') {
-      updateData.completion_time = new Date();
-      if (!existingQueue.start_time) {
-        updateData.start_time = new Date();
+      const existingEntries = await query('SELECT * FROM queue WHERE id = ? LIMIT 1', [queueId]);
+      if (!existingEntries.length) {
+        return res.status(404).json({ success: false, message: 'Queue entry not found' });
       }
+
+      await query(
+        `
+          UPDATE queue
+          SET
+            status = ?,
+            start_time = CASE
+              WHEN ? IN (?, ?) AND start_time IS NULL THEN NOW()
+              WHEN ? = ? THEN NULL
+              ELSE start_time
+            END,
+            completion_time = CASE
+              WHEN ? = ? THEN NOW()
+              ELSE NULL
+            END
+          WHERE id = ?
+        `,
+        [
+          status,
+          status,
+          QUEUE_STATUS.CONSULTATION,
+          QUEUE_STATUS.TREATMENT,
+          status,
+          QUEUE_STATUS.WAITING,
+          status,
+          QUEUE_STATUS.DONE,
+          queueId
+        ]
+      );
+
+      res.status(200).json({ success: true, message: `Status updated to ${status}` });
+    } catch (error) {
+      console.error('Error updating status:', error);
+      res.status(500).json({ success: false, message: 'Failed to update status' });
     }
+  },
 
-    // Update queue entry
-    await update('queue', updateData, { id });
-
-    await logAuditEvent(req.user.id, 'UPDATE', 'QUEUE', id, existingQueue, updateData);
-
-    // Return updated queue entry with details
-    const updatedQueueQuery = `
-      SELECT 
-        q.*,
-        p.patient_code,
-        CONCAT(p.first_name, ' ', p.last_name) as patient_name,
-        TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) as patient_age,
-        provider.name as provider_name,
-        student.name as student_name
-      FROM queue q
-      LEFT JOIN patients p ON q.patient_id = p.id
-      LEFT JOIN users provider ON q.provider_id = provider.id
-      LEFT JOIN users student ON q.student_id = student.id
-      WHERE q.id = ?
-    `;
-
-    const updatedQueue = await query(updatedQueueQuery, [id]);
-
-    res.json({
-      success: true,
-      message: 'Queue status updated successfully',
-      data: updatedQueue[0]
-    });
-  } catch (error) {
-    console.error('Update queue status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// Remove from queue
-const removeFromQueue = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Check if queue entry exists
-    const existingQueue = await findOne('queue', { id });
-    if (!existingQueue) {
-      return res.status(404).json({
-        success: false,
-        message: 'Queue entry not found'
-      });
-    }
-
-    // Remove from queue
-    await remove('queue', { id }, false);
-
-    await logAuditEvent(req.user.id, 'DELETE', 'QUEUE', id, existingQueue, null);
-
-    res.json({
-      success: true,
-      message: 'Patient removed from queue successfully'
-    });
-  } catch (error) {
-    console.error('Remove from queue error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// Get queue statistics
-const getQueueStats = async (req, res) => {
-  try {
-    const { period = 'today' } = req.query;
-
-    let dateFilter;
-    switch (period) {
-      case 'today':
-        dateFilter = 'DATE(q.arrival_time) = CURDATE()';
-        break;
-      case 'week':
-        dateFilter = 'q.arrival_time >= DATE_SUB(NOW(), INTERVAL 1 WEEK)';
-        break;
-      case 'month':
-        dateFilter = 'q.arrival_time >= DATE_SUB(NOW(), INTERVAL 1 MONTH)';
-        break;
-      default:
-        dateFilter = 'DATE(q.arrival_time) = CURDATE()';
-    }
-
-    const statsQuery = `
-      SELECT 
-        COUNT(*) as total_patients,
-        COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed,
-        COUNT(CASE WHEN status = 'WAITING' THEN 1 END) as waiting,
-        COUNT(CASE WHEN status = 'IN_TREATMENT' THEN 1 END) as in_treatment,
-        COUNT(CASE WHEN status = 'PREPARATION' THEN 1 END) as preparation,
-        AVG(TIMESTAMPDIFF(MINUTE, arrival_time, COALESCE(completion_time, NOW()))) as avg_total_time,
-        AVG(TIMESTAMPDIFF(MINUTE, arrival_time, start_time)) as avg_wait_time,
-        AVG(TIMESTAMPDIFF(MINUTE, start_time, completion_time)) as avg_treatment_time
-      FROM queue q
-      WHERE ${dateFilter}
-    `;
-
-    const stats = await query(statsQuery);
-
-    // Hourly queue volume
-    const hourlyStatsQuery = `
-      SELECT 
-        HOUR(arrival_time) as hour,
-        COUNT(*) as patient_count
-      FROM queue 
-      WHERE ${dateFilter}
-      GROUP BY HOUR(arrival_time)
-      ORDER BY hour ASC
-    `;
-
-    const hourlyStats = await query(hourlyStatsQuery);
-
-    // Provider workload
-    const providerStatsQuery = `
-      SELECT 
-        u.name as provider_name,
-        COUNT(*) as patient_count,
-        AVG(TIMESTAMPDIFF(MINUTE, q.arrival_time, q.completion_time)) as avg_treatment_time
-      FROM queue q
-      LEFT JOIN users u ON q.provider_id = u.id
-      WHERE ${dateFilter} AND q.provider_id IS NOT NULL
-      GROUP BY q.provider_id, u.name
-      ORDER BY patient_count DESC
-    `;
-
-    const providerStats = await query(providerStatsQuery);
-
-    res.json({
-      success: true,
-      data: {
-        overview: stats[0],
-        hourly_volume: hourlyStats,
-        provider_workload: providerStats
+  removeQueueEntry: async (req, res) => {
+    try {
+      const affectedRows = await remove('queue', { id: req.params.id }, false);
+      if (!affectedRows) {
+        return res.status(404).json({ success: false, message: 'Queue entry not found' });
       }
-    });
-  } catch (error) {
-    console.error('Get queue stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+
+      res.status(200).json({ success: true, message: 'Queue entry removed' });
+    } catch (error) {
+      console.error('Error removing queue entry:', error);
+      res.status(500).json({ success: false, message: 'Failed to remove queue entry' });
+    }
   }
 };
 
-module.exports = {
-  getQueue,
-  addToQueue,
-  updateQueueStatus,
-  removeFromQueue,
-  getQueueStats
-};
+module.exports = queueController;

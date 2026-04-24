@@ -284,13 +284,16 @@ export function PatientListPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const canCreatePatients = user?.role === 'RECEPTION';
-  const canManagePatientDirectory = user?.role === 'RECEPTION';
-  const canDeletePatients = user?.role === 'ADMIN';
-  const canOrthoAssignCareTeam = user?.role === 'ORTHODONTIST';
-  const canAssignCareTeam = ['RECEPTION', 'ORTHODONTIST'].includes(user?.role || '');
-  const canFilterByAssignedOrthodontist = ['ADMIN', 'RECEPTION', 'DENTAL_SURGEON', 'STUDENT', 'NURSE'].includes(user?.role || '');
-  const canExportAssignedPatientRecord = ['ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(user?.role || '');
+  // ✅ FULLY FIXED: Using an array to check permissions dynamically!
+  const currentUserRole = String(user?.role || (user as any)?.user?.role || '').toUpperCase();
+  const canCreatePatients = ['RECEPTION', 'DENTAL_SURGEON', 'ORTHODONTIST', 'ADMIN'].includes(currentUserRole);
+  const canManagePatientDirectory = ['RECEPTION', 'DENTAL_SURGEON', 'ORTHODONTIST', 'ADMIN'].includes(currentUserRole);
+  
+  const canDeletePatients = currentUserRole === 'ADMIN';
+  const canOrthoAssignCareTeam = currentUserRole === 'ORTHODONTIST';
+  const canAssignCareTeam = ['RECEPTION', 'ORTHODONTIST'].includes(currentUserRole);
+  const canFilterByAssignedOrthodontist = ['ADMIN', 'RECEPTION', 'DENTAL_SURGEON', 'STUDENT', 'NURSE'].includes(currentUserRole);
+  const canExportAssignedPatientRecord = ['ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(currentUserRole);
   const canShowAssignAction = canManagePatientDirectory ? canAssignCareTeam : canOrthoAssignCareTeam;
 
   const loadPatients = async (
@@ -1462,7 +1465,7 @@ export function PatientListPage() {
       )}
 
       {confirmDialog.open && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/45 backdrop-blur-[1px] p-4">
+        <div className="fixed inset-0 z- flex items-center justify-center bg-slate-900/45 backdrop-blur-[1px] p-4">
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
             <div
               className={`px-5 py-4 border-b ${

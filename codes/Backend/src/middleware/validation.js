@@ -2,6 +2,12 @@ const Joi = require('joi');
 const tenDigitPhone = Joi.string().pattern(/^\d{10}$/).messages({
   'string.pattern.base': 'Phone number must be exactly 10 digits'
 });
+const queueStatusValues = [
+  'In waiting room',
+  'under consultation',
+  'under treatment',
+  'Treatments are done / Done'
+];
 
 // Validation middleware factory
 const validate = (schema, property = 'body') => {
@@ -276,14 +282,16 @@ const schemas = {
       'any.required': 'Patient ID is required'
     }),
     provider_id: Joi.number().integer().positive().optional(),
-    student_id: Joi.number().integer().positive().optional(),
+    student_id: Joi.number().integer().positive().allow(null).optional(),
+    status: Joi.string().valid(...queueStatusValues).optional(),
+    bay: Joi.string().max(20).allow('', null).optional(),
     priority: Joi.string().valid('LOW', 'NORMAL', 'HIGH', 'URGENT').optional(),
     procedure_type: Joi.string().max(255).optional(),
     notes: Joi.string().max(1000).optional()
   }),
 
   updateQueueStatus: Joi.object({
-    status: Joi.string().valid('WAITING', 'IN_TREATMENT', 'PREPARATION', 'COMPLETED').required().messages({
+    status: Joi.string().valid(...queueStatusValues).required().messages({
       'any.required': 'Status is required'
     }),
     notes: Joi.string().max(1000).optional()
