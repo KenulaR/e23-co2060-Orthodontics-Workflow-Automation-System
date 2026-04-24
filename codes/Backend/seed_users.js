@@ -18,10 +18,8 @@ async function createAllTestAccounts() {
             database: process.env.DB_NAME || 'orthoflow'
         });
 
-        console.log("Encrypting passwords for the full clinical staff...");
-        const passwordHash = await bcrypt.hash('123456', 10);
-        
         const testAccountPassword = process.env.SEED_TEST_PASSWORD?.trim() || 'password123';
+        console.log("Encrypting passwords for the full clinical staff...");
         const passwordHash = await bcrypt.hash(testAccountPassword, 10);
 
         // Array of all 6 roles: [Name, Email, Role, Status]

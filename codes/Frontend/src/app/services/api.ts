@@ -786,6 +786,9 @@ export const apiService = {
     getList: () => 
       apiClient.get<any>(API_ENDPOINTS.QUEUE.LIST),
 
+    getAvailablePatients: () =>
+      apiClient.get<any[]>(API_ENDPOINTS.QUEUE.PATIENTS),
+
     getStats: () =>
       apiClient.get<any>(API_ENDPOINTS.QUEUE.STATS),
     

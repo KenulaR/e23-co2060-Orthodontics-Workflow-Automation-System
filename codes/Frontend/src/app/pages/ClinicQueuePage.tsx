@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../context/AuthContext'; // ✅ Added exact role syncing
+import { useAuth } from '../context/AuthContext';
+import { apiService } from '../services/api';
 
 export function ClinicQueuePage() {
   const { user } = useAuth();
@@ -18,19 +19,6 @@ export function ClinicQueuePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // ✅ Token extraction happens exactly when the fetch is called to prevent 401 errors
-  const getAuthHeaders = () => {
-    const storedUser = localStorage.getItem('user');
-    let token = '';
-    if (storedUser) {
-      try { token = JSON.parse(storedUser).token || ''; } catch (e) {}
-    }
-    return {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    };
-  };
 
   useEffect(() => {
     fetchClinicBoard();
@@ -51,8 +39,7 @@ export function ClinicQueuePage() {
 
   const fetchPatientsList = async () => {
     try {
-      const response = await fetch('http://localhost:3000/api/queue/patients', { headers: getAuthHeaders() });
-      const result = await response.json();
+      const result = await apiService.queue.getAvailablePatients();
       if (result.success && Array.isArray(result.data)) setPatientsList(result.data);
       else setPatientsList([]);
     } catch (error) {
@@ -62,11 +49,15 @@ export function ClinicQueuePage() {
 
   const fetchClinicBoard = async () => {
     try {
-      const response = await fetch('http://localhost:3000/api/queue', { headers: getAuthHeaders() });
-      const result = await response.json();
+      const result: any = await apiService.queue.getList();
       if (result.success) {
-        setQueueData(result.data);
-        setStats(result.stats);
+        setQueueData(Array.isArray(result.data) ? result.data : []);
+        setStats({
+          inTreatment: Number(result.stats?.inTreatment || 0),
+          waiting: Number(result.stats?.waiting || 0),
+          done: Number(result.stats?.done || 0),
+          totalToday: Number(result.stats?.totalToday || 0)
+        });
       }
     } catch (error) {
       console.error("Failed to fetch clinic board:", error);
@@ -80,15 +71,11 @@ export function ClinicQueuePage() {
     if (!newPatient.patient_id) return; 
 
     try {
-      const response = await fetch('http://localhost:3000/api/queue', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(newPatient)
-      });
-      const result = await response.json();
+      const result = await apiService.queue.addToQueue(newPatient);
       if (result.success) {
         handleCloseModal();
         fetchClinicBoard();
+        fetchPatientsList();
       } else {
         alert(result.message);
       }
@@ -106,13 +93,12 @@ export function ClinicQueuePage() {
 
   const updatePatientStatus = async (queueId: number, newStatus: string) => {
     try {
-      const response = await fetch(`http://localhost:3000/api/queue/${queueId}/status`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ status: newStatus })
-      });
-      const result = await response.json();
-      if (result.success) fetchClinicBoard();
+      const result = await apiService.queue.updateStatus(String(queueId), { status: newStatus });
+      if (result.success) {
+        fetchClinicBoard();
+      } else {
+        alert(result.message);
+      }
     } catch (error) {
       console.error("Error updating status:", error);
     }

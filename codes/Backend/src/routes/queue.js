@@ -1,16 +1,33 @@
 const express = require('express');
 const router = express.Router();
 const queueController = require('../controllers/queueController');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorizeRoles } = require('../middleware/auth');
+const { validate, schemas } = require('../middleware/validation');
 
-// ⚠️ IMPORTANT: Specific routes like '/patients' MUST go BEFORE dynamic routes like '/:id'
-router.get('/patients', queueController.getAvailablePatients); 
+router.use(authenticate);
 
-// Standard routes
+router.get('/patients', queueController.getAvailablePatients);
+router.get('/stats', queueController.getQueueStats);
+
 router.get('/', queueController.getClinicBoard);
-router.post('/', queueController.registerPatient);
+router.post(
+  '/',
+  authorizeRoles('RECEPTION', 'DENTAL_SURGEON', 'ORTHODONTIST', 'ADMIN'),
+  validate(schemas.createQueue),
+  queueController.registerPatient
+);
 
-// Dynamic routes (these catch anything with an ID, so they must go last)
-router.put('/:id/status', authenticate, queueController.updateQueueStatus);
+router.put(
+  '/:id/status',
+  authorizeRoles('RECEPTION', 'DENTAL_SURGEON', 'ORTHODONTIST', 'ADMIN'),
+  validate(schemas.updateQueueStatus),
+  queueController.updateQueueStatus
+);
+
+router.delete(
+  '/:id',
+  authorizeRoles('RECEPTION', 'DENTAL_SURGEON', 'ORTHODONTIST', 'ADMIN'),
+  queueController.removeQueueEntry
+);
 
 module.exports = router;

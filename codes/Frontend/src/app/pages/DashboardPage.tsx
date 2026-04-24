@@ -64,7 +64,7 @@ export function DashboardPage() {
         safe<any>(apiService.patients.getStats()),
         safe<any>(apiService.visits.getToday()),
         safe<any>(apiService.visits.getStats()),
-        safe<any>(apiService.queue.getList()),
+        safe<any>(apiService.queue.getStats()),
         safe<any>(apiService.cases.getStats()),
         safe<any>(apiService.inventory.getStats()),
         user?.role === 'ADMIN' ? safe<any>(apiService.reports.dashboard('month')) : Promise.resolve(null),
