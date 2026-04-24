@@ -2908,7 +2908,7 @@ const getPatientHistory = async (req, res) => {
       date_of_examination: patient.created_at ? String(patient.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10)
     };
 
-    const row = historyRows || null;
+    const row = Array.isArray(historyRows) ? historyRows[0] || null : historyRows || null;
     let normalizedHistory = {};
     if (row?.form_data && typeof row.form_data === 'object') {
       normalizedHistory = row.form_data;
@@ -2977,7 +2977,7 @@ const upsertPatientHistory = async (req, res) => {
         [patientId]
       );
       let existingForm = {};
-      const existing = existingRows;
+      const existing = Array.isArray(existingRows) ? existingRows[0] || null : existingRows || null;
       if (existing?.form_data && typeof existing.form_data === 'object') {
         existingForm = existing.form_data;
       } else if (typeof existing?.form_data === 'string') {
@@ -3020,7 +3020,7 @@ const upsertPatientHistory = async (req, res) => {
       [patientId]
     );
 
-    const saved = rows || null;
+    const saved = Array.isArray(rows) ? rows[0] || null : rows || null;
     let normalizedFormData = {};
     if (saved?.form_data && typeof saved.form_data === 'object') {
       normalizedFormData = saved.form_data;

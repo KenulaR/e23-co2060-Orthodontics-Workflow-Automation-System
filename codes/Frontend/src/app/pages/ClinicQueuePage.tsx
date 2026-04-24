@@ -1,17 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { X } from 'lucide-react';
+import { Button } from '../components/UI';
 import { useAuth } from '../context/AuthContext';
 import { apiService } from '../services/api';
 
+const QUEUE_STATUS_OPTIONS = [
+  { value: 'In waiting room', label: 'In waiting room' },
+  { value: 'under consultation', label: 'Under consultation' },
+  { value: 'under treatment', label: 'Under treatment' },
+  { value: 'Treatments are done / Done', label: 'Done' },
+];
+
 export function ClinicQueuePage() {
   const { user } = useAuth();
-  
-  // ✅ 100% accurate role extraction directly from the AuthContext
-  const currentUserRole = user?.role?.toUpperCase() || (user as any)?.user?.role?.toUpperCase() || '';
+  const currentUserRole = user?.role?.toUpperCase() || '';
+  const canReadQueue = ['RECEPTION', 'ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(currentUserRole);
+  const canAddPatient = currentUserRole === 'RECEPTION';
+  const canAutoStartConsultation = ['DENTAL_SURGEON', 'ORTHODONTIST', 'STUDENT'].includes(currentUserRole);
 
   const [queueData, setQueueData] = useState<any[]>([]);
   const [patientsList, setPatientsList] = useState<any[]>([]);
   const [stats, setStats] = useState({ inTreatment: 0, waiting: 0, done: 0, totalToday: 0 });
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [newPatient, setNewPatient] = useState({ patient_id: '', status: 'In waiting room' });
@@ -21,11 +32,24 @@ export function ClinicQueuePage() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!canReadQueue) {
+      setQueueData([]);
+      setPatientsList([]);
+      setStats({ inTreatment: 0, waiting: 0, done: 0, totalToday: 0 });
+      setIsLoading(false);
+      setError('You do not have access to the clinic queue.');
+      return;
+    }
+
     fetchClinicBoard();
-    fetchPatientsList();
+    if (canAddPatient) {
+      fetchPatientsList();
+    } else {
+      setPatientsList([]);
+    }
     const interval = setInterval(fetchClinicBoard, 30000);
     return () => clearInterval(interval);
-  }, [currentUserRole]); // Reload if user role changes
+  }, [canAddPatient, canReadQueue, currentUserRole]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -38,6 +62,11 @@ export function ClinicQueuePage() {
   }, []);
 
   const fetchPatientsList = async () => {
+    if (!canAddPatient) {
+      setPatientsList([]);
+      return;
+    }
+
     try {
       const result = await apiService.queue.getAvailablePatients();
       if (result.success && Array.isArray(result.data)) setPatientsList(result.data);
@@ -49,6 +78,7 @@ export function ClinicQueuePage() {
 
   const fetchClinicBoard = async () => {
     try {
+      setError(null);
       const result: any = await apiService.queue.getList();
       if (result.success) {
         setQueueData(Array.isArray(result.data) ? result.data : []);
@@ -59,8 +89,10 @@ export function ClinicQueuePage() {
           totalToday: Number(result.stats?.totalToday || 0)
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to fetch clinic board:", error);
+      setQueueData([]);
+      setError(error?.message || 'Failed to fetch clinic queue');
     } finally {
       setIsLoading(false);
     }
@@ -68,7 +100,7 @@ export function ClinicQueuePage() {
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPatient.patient_id) return; 
+    if (!newPatient.patient_id || !canAddPatient) return;
 
     try {
       const result = await apiService.queue.addToQueue(newPatient);
@@ -105,8 +137,7 @@ export function ClinicQueuePage() {
   };
 
   const handleDoctorClick = (item: any) => {
-    const isDoctor = ['DENTAL_SURGEON', 'ORTHODONTIST'].includes(currentUserRole);
-    if (isDoctor && item.status === 'In waiting room') {
+    if (canAutoStartConsultation && item.status === 'In waiting room' && item.can_update) {
       updatePatientStatus(item.queue_id, 'under consultation');
     }
   };
@@ -119,11 +150,7 @@ export function ClinicQueuePage() {
   });
 
   if (isLoading) return <div className="flex items-center justify-center h-64 font-medium text-slate-500">Loading Clinic Live...</div>;
-
-  // ✅ Proper button visibility logic
-  const isDoctor = ['DENTAL_SURGEON', 'ORTHODONTIST'].includes(currentUserRole);
-  const canAddPatient = ['RECEPTION', 'DENTAL_SURGEON', 'ORTHODONTIST', 'ADMIN'].includes(currentUserRole);
-  const isStatusLocked = ['NURSE', 'STUDENT'].includes(currentUserRole);
+  const isDoctor = canAutoStartConsultation;
 
   return (
     <div className="space-y-6">
@@ -159,13 +186,19 @@ export function ClinicQueuePage() {
           )}
         </div>
 
+        {error && (
+          <div className="border-b border-red-100 bg-red-50 px-6 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         <div className="divide-y divide-slate-100">
           {queueData.map((item: any) => (
             <div
               key={item.queue_id}
               onClick={() => handleDoctorClick(item)}
               className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 transition-colors 
-                ${isDoctor && item.status === 'In waiting room' ? 'hover:bg-blue-50 cursor-pointer group' : 'hover:bg-slate-50'}`}
+                ${isDoctor && item.status === 'In waiting room' && item.can_update ? 'hover:bg-blue-50 cursor-pointer group' : 'hover:bg-slate-50'}`}
             >
               <div className="flex items-center gap-4 mb-4 sm:mb-0">
                 <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shrink-0
@@ -175,7 +208,7 @@ export function ClinicQueuePage() {
                 <div>
                   <h4 className="font-bold text-slate-800 text-lg flex items-center gap-2">
                     {item.patient_name}
-                    {isDoctor && item.status === 'In waiting room' && (
+                    {isDoctor && item.status === 'In waiting room' && item.can_update && (
                       <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                         Click to begin consultation
                       </span>
@@ -198,89 +231,107 @@ export function ClinicQueuePage() {
                     ${item.status === 'under consultation'        ? 'bg-purple-50 text-purple-700 ring-purple-200' : ''}
                     ${item.status === 'under treatment'           ? 'bg-blue-50   text-blue-700   ring-blue-200'   : ''}
                     ${item.status === 'Treatments are done / Done'? 'bg-green-50  text-green-700  ring-green-200'  : ''}
-                    ${isStatusLocked ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
-                  disabled={isStatusLocked}
+                    ${item.can_update ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
+                  disabled={!item.can_update}
                 >
-                  <option value="In waiting room">In waiting room</option>
-                  <option value="under consultation">Under consultation</option>
-                  <option value="under treatment">Under treatment</option>
-                  {!isStatusLocked && (
-                    <option value="Treatments are done / Done">Done</option>
-                  )}
+                  {QUEUE_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
           ))}
-          {queueData.length === 0 && <div className="p-8 text-center text-slate-500">No patients currently in the queue.</div>}
+          {queueData.length === 0 && !error && <div className="p-8 text-center text-slate-500">No patients currently in the queue.</div>}
         </div>
       </div>
 
       {isRegisterModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-slate-800">Add Patient to Queue</h2>
-              <button onClick={handleCloseModal} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h3 className="text-xl font-bold text-gray-900">Add Patient to Queue</h3>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-10 w-10 border border-red-200 bg-red-50 text-red-600 hover:border-red-300 hover:bg-red-100 active:bg-red-200"
+                onClick={handleCloseModal}
+              >
+                <X className="w-4 h-4" />
+              </Button>
             </div>
 
-            <form onSubmit={handleRegisterSubmit} className="space-y-5">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Patient</label>
-                <div className="relative" ref={dropdownRef}>
-                  <input
-                    type="text"
-                    className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none text-sm"
-                    placeholder="Search by name or ID..."
-                    value={searchQuery}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setIsDropdownOpen(true);
-                      setNewPatient(prev => ({ ...prev, patient_id: '' }));
-                    }}
-                    onFocus={() => setIsDropdownOpen(true)}
-                  />
+            <form onSubmit={handleRegisterSubmit} className="space-y-4 px-6 py-5">
+              <div className="rounded-xl border border-green-100 bg-green-50/60 p-5">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-xs font-semibold text-gray-600">Patient</label>
+                    <div className="relative" ref={dropdownRef}>
+                      <input
+                        type="text"
+                        className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        placeholder="Search by name or ID..."
+                        value={searchQuery}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value);
+                          setIsDropdownOpen(true);
+                          setNewPatient(prev => ({ ...prev, patient_id: '' }));
+                        }}
+                        onFocus={() => setIsDropdownOpen(true)}
+                      />
 
-                  {isDropdownOpen && (
-                    <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
-                      {filteredPatients.length === 0 ? (
-                        <div className="px-4 py-3 text-sm text-slate-400 text-center">No patients found.</div>
-                      ) : (
-                        filteredPatients.map(p => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors flex items-center justify-between gap-2"
-                            onClick={() => {
-                              setNewPatient({ ...newPatient, patient_id: String(p.id) });
-                              setSearchQuery(`${p.first_name} ${p.last_name}`);
-                              setIsDropdownOpen(false);
-                            }}
-                          >
-                            <span className="text-sm font-medium text-slate-800">{p.first_name} {p.last_name}</span>
-                          </button>
-                        ))
+                      {isDropdownOpen && (
+                        <div className="absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                          {filteredPatients.length === 0 ? (
+                            <div className="px-4 py-3 text-center text-sm text-gray-400">No patients found.</div>
+                          ) : (
+                            filteredPatients.map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-blue-50"
+                                onClick={() => {
+                                  setNewPatient({ ...newPatient, patient_id: String(p.id) });
+                                  setSearchQuery(`${p.first_name} ${p.last_name}`);
+                                  setIsDropdownOpen(false);
+                                }}
+                              >
+                                <span className="text-sm font-medium text-gray-900">{p.first_name} {p.last_name}</span>
+                                {p.patient_code && <span className="text-xs font-medium text-gray-400">{p.patient_code}</span>}
+                              </button>
+                            ))
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-xs font-semibold text-gray-600">Initial Status</label>
+                    <select
+                      className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      value={newPatient.status}
+                      onChange={(e) => setNewPatient({ ...newPatient, status: e.target.value })}
+                    >
+                      {QUEUE_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Initial Status</label>
-                <select
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 bg-white text-sm"
-                  value={newPatient.status}
-                  onChange={(e) => setNewPatient({ ...newPatient, status: e.target.value })}
-                >
-                  <option value="In waiting room">In waiting room</option>
-                  <option value="under consultation">Under consultation</option>
-                  <option value="under treatment">Under treatment</option>
-                </select>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={handleCloseModal} className="flex-1 bg-slate-100 py-2.5 rounded-lg text-sm">Cancel</button>
-                <button type="submit" disabled={!newPatient.patient_id} className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm disabled:opacity-40">Add to Queue</button>
+              <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="secondary" onClick={handleCloseModal}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!newPatient.patient_id}>
+                Add to Queue
+              </Button>
               </div>
             </form>
           </div>

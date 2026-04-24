@@ -2,6 +2,7 @@ const express = require('express');
 const { validate, schemas } = require('../middleware/validation');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { requirePermission, OBJECT_TYPES, PERMISSIONS } = require('../middleware/accessControl');
 const patientController = require('../controllers/patientController');
 
 const router = express.Router();
@@ -49,6 +50,91 @@ router.post('/assignment-requests/:requestId/respond',
 // GET /api/patients/:id - Get single patient by ID
 router.get('/:id', 
   asyncHandler(patientController.getPatientById)
+);
+
+// GET /api/patients/:id/history - Get patient history
+router.get('/:id/history',
+  requirePermission(OBJECT_TYPES.PATIENT_MEDICAL, PERMISSIONS.READ, { patientIdParam: 'id' }),
+  asyncHandler(patientController.getPatientHistory)
+);
+
+// PUT /api/patients/:id/history - Save patient history
+router.put('/:id/history',
+  requirePermission(OBJECT_TYPES.PATIENT_MEDICAL, PERMISSIONS.UPDATE, { patientIdParam: 'id' }),
+  validate(schemas.updatePatientHistory),
+  asyncHandler(patientController.upsertPatientHistory)
+);
+
+// GET /api/patients/:id/dental-chart - Get standard dental chart entries
+router.get('/:id/dental-chart',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.READ, { patientIdParam: 'id' }),
+  asyncHandler(patientController.getDentalChart)
+);
+
+// PUT /api/patients/:id/dental-chart/:toothNumber - Upsert standard dental chart entry
+router.put('/:id/dental-chart/:toothNumber',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.UPDATE, { patientIdParam: 'id' }),
+  asyncHandler(patientController.upsertDentalChartEntry)
+);
+
+// DELETE /api/patients/:id/dental-chart/:toothNumber - Delete standard dental chart entry
+router.delete('/:id/dental-chart/:toothNumber',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.UPDATE, { patientIdParam: 'id' }),
+  asyncHandler(patientController.deleteDentalChartEntry)
+);
+
+// GET /api/patients/:id/dental-chart/custom - Get custom dental chart entries
+router.get('/:id/dental-chart/custom',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.READ, { patientIdParam: 'id' }),
+  asyncHandler(patientController.getDentalChartCustom)
+);
+
+// PUT /api/patients/:id/dental-chart/custom/:toothCode - Upsert custom dental chart entry
+router.put('/:id/dental-chart/custom/:toothCode',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.UPDATE, { patientIdParam: 'id' }),
+  asyncHandler(patientController.upsertDentalChartCustomEntry)
+);
+
+// DELETE /api/patients/:id/dental-chart/custom/:toothCode - Delete custom dental chart entry
+router.delete('/:id/dental-chart/custom/:toothCode',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.UPDATE, { patientIdParam: 'id' }),
+  asyncHandler(patientController.deleteDentalChartCustomEntry)
+);
+
+// GET /api/patients/:id/dental-chart/versions - List saved annotated chart versions
+router.get('/:id/dental-chart/versions',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.READ, { patientIdParam: 'id' }),
+  asyncHandler(patientController.listDentalChartVersions)
+);
+
+// POST /api/patients/:id/dental-chart/versions - Create saved annotated chart version
+router.post('/:id/dental-chart/versions',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.UPDATE, { patientIdParam: 'id' }),
+  asyncHandler(patientController.createDentalChartVersion)
+);
+
+// GET /api/patients/:id/dental-chart/versions/:versionId/download - Download chart version PDF
+router.get('/:id/dental-chart/versions/:versionId/download',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.READ, { patientIdParam: 'id' }),
+  asyncHandler(patientController.downloadDentalChartVersion)
+);
+
+// DELETE /api/patients/:id/dental-chart/versions/:versionId - Delete chart version
+router.delete('/:id/dental-chart/versions/:versionId',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.UPDATE, { patientIdParam: 'id' }),
+  asyncHandler(patientController.deleteDentalChartVersion)
+);
+
+// PUT /api/patients/:id/dental-chart/versions/:versionId/restore - Restore chart version
+router.put('/:id/dental-chart/versions/:versionId/restore',
+  requirePermission(OBJECT_TYPES.PATIENT_RADIOGRAPHS, PERMISSIONS.UPDATE, { patientIdParam: 'id' }),
+  asyncHandler(patientController.restoreDentalChartVersion)
+);
+
+// GET /api/patients/:id/record-export - Export patient record PDF
+router.get('/:id/record-export',
+  requirePermission(OBJECT_TYPES.PATIENT_GENERAL, PERMISSIONS.READ, { patientIdParam: 'id' }),
+  asyncHandler(patientController.exportPatientRecordPdf)
 );
 
 // POST /api/patients - Create new patient

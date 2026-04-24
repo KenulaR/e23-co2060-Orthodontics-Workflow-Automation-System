@@ -79,10 +79,11 @@ export function PatientProfilePage() {
     setError(null);
     try {
       const patientResponse = await apiService.patients.getById(patientId);
+      const shouldLoadHistory = canReadPatientHistory(user?.role);
       const [visitResponse, noteResponse, historyResponse] = await Promise.allSettled([
         apiService.visits.getPatientVisits(patientId, { page: 1, limit: 100 }),
         apiService.clinicalNotes.getPatientNotes(patientId, { page: 1, limit: 100 }),
-        apiService.patients.getHistory(patientId),
+        shouldLoadHistory ? apiService.patients.getHistory(patientId) : Promise.resolve({ success: true, data: null }),
       ]);
 
       const payload = patientResponse.data || {};
@@ -115,7 +116,7 @@ export function PatientProfilePage() {
 
   useEffect(() => {
     loadPatient();
-  }, [patientId]);
+  }, [patientId, user?.role]);
 
   const tabs = useMemo<TabConfig[]>(() => ([
     { id: 'overview', label: 'Overview', icon: User, canView: () => true },

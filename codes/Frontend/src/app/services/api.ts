@@ -70,10 +70,39 @@ class ApiClient {
     this.loadTokensFromStorage();
   }
 
+  private parseJwtPayload(token: string | null): Record<string, any> | null {
+    if (!token) return null;
+
+    try {
+      const [, payload] = token.split('.');
+      if (!payload) return null;
+      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+      return JSON.parse(atob(padded));
+    } catch {
+      return null;
+    }
+  }
+
+  private isJwtExpired(token: string | null, skewSeconds = 15): boolean {
+    const payload = this.parseJwtPayload(token);
+    const exp = Number(payload?.exp || 0);
+    if (!exp) return false;
+    return exp <= Math.floor(Date.now() / 1000) + skewSeconds;
+  }
+
   // Token management
   private loadTokensFromStorage() {
-    this.accessToken = localStorage.getItem('accessToken');
-    this.refreshToken = localStorage.getItem('refreshToken');
+    const storedAccessToken = localStorage.getItem('accessToken');
+    const storedRefreshToken = localStorage.getItem('refreshToken');
+
+    if (this.isJwtExpired(storedRefreshToken)) {
+      this.clearTokensFromStorage();
+      return;
+    }
+
+    this.accessToken = this.isJwtExpired(storedAccessToken) ? null : storedAccessToken;
+    this.refreshToken = storedRefreshToken;
   }
 
   private saveTokensToStorage(accessToken: string, refreshToken: string) {
@@ -119,6 +148,17 @@ class ApiClient {
     // Always fetch fresh API state for GET requests (important for explicit Refresh actions)
     if ((config.method || 'GET').toUpperCase() === 'GET') {
       config.cache = 'no-store';
+    }
+
+    if (!this.accessToken && this.shouldAttemptTokenRefresh(endpoint)) {
+      const refreshSuccess = await this.refreshAccessToken();
+      if (!refreshSuccess) {
+        this.clearTokensFromStorage();
+        if (window.location.pathname !== '/login') {
+          window.location.assign('/login');
+        }
+        throw new Error(ERROR_MESSAGES.UNAUTHORIZED);
+      }
     }
 
     // Add auth header if token exists
