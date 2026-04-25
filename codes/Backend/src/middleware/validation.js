@@ -4,6 +4,7 @@ const tenDigitPhone = Joi.string().pattern(/^\d{10}$/).messages({
 });
 const queueStatusValues = [
   'In waiting room',
+  'under consultation',
   'under treatment',
   'Treatments are done / Done'
 ];

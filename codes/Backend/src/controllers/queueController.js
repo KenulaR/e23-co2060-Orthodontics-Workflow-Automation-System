@@ -2,23 +2,24 @@ const { query, remove } = require('../config/database');
 
 const QUEUE_STATUS = {
   WAITING: 'In waiting room',
+  CONSULTATION: 'under consultation',
   TREATMENT: 'under treatment',
   DONE: 'Treatments are done / Done'
 };
 
 const ACTIVE_QUEUE_STATUSES = [
   QUEUE_STATUS.WAITING,
+  QUEUE_STATUS.CONSULTATION,
   QUEUE_STATUS.TREATMENT
 ];
 
-const QUEUE_READ_ROLES = new Set(['ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'NURSE', 'STUDENT', 'RECEPTION']);
-const QUEUE_MUTATE_ROLES = new Set(['ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'RECEPTION']);
+const ASSIGNMENT_SCOPED_QUEUE_ROLES = new Set(['ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT']);
 
-const canReadQueue = (role) => QUEUE_READ_ROLES.has(role);
+const canReadQueue = (role) => ['RECEPTION', 'ADMIN', ...ASSIGNMENT_SCOPED_QUEUE_ROLES].includes(role);
 
-const canAddQueuePatient = (role) => QUEUE_MUTATE_ROLES.has(role);
+const canAddQueuePatient = (role) => role === 'RECEPTION';
 
-const canRemoveQueuePatient = (role) => QUEUE_MUTATE_ROLES.has(role);
+const canRemoveQueuePatient = (role) => role === 'RECEPTION';
 
 const buildForbiddenResponse = (res, message = 'You do not have access to the clinic queue') =>
   res.status(403).json({ success: false, message });
@@ -27,7 +28,11 @@ const getQueueReadScope = (user) => {
   if (!user) return { allowed: false };
   if (!canReadQueue(user.role)) return { allowed: false };
 
-  return { allowed: true };
+  if (user.role === 'RECEPTION' || user.role === 'ADMIN') {
+    return { allowed: true, assignmentScoped: false };
+  }
+
+  return { allowed: true, assignmentScoped: true };
 };
 
 const buildQueueFilter = (user) => {
@@ -36,19 +41,51 @@ const buildQueueFilter = (user) => {
     return null;
   }
 
+  if (!scope.assignmentScoped) {
+    return {
+      whereClause: '',
+      params: []
+    };
+  }
+
   return {
-    whereClause: '',
-    params: []
+    whereClause: `
+      AND EXISTS (
+        SELECT 1
+        FROM patient_assignments pa
+        WHERE pa.patient_id = q.patient_id
+          AND pa.user_id = ?
+          AND pa.assignment_role = ?
+          AND pa.active = TRUE
+      )
+    `,
+    params: [user.id, user.role]
   };
 };
 
 const canUpdateQueueEntry = async (user, queueEntry) => {
   if (!user || !queueEntry) return false;
-  return QUEUE_MUTATE_ROLES.has(user.role);
+  if (user.role === 'RECEPTION') return true;
+  if (!ASSIGNMENT_SCOPED_QUEUE_ROLES.has(user.role)) return false;
+
+  const assignmentRows = await query(
+    `SELECT 1
+     FROM patient_assignments
+     WHERE patient_id = ?
+       AND user_id = ?
+       AND assignment_role = ?
+       AND active = TRUE
+     LIMIT 1`,
+    [queueEntry.patient_id, user.id, user.role]
+  );
+
+  return assignmentRows.length > 0;
 };
 
 const buildStats = (items) => {
-  const inTreatment = items.filter((item) => item.status === QUEUE_STATUS.TREATMENT).length;
+  const inTreatment = items.filter(
+    (item) => item.status === QUEUE_STATUS.TREATMENT || item.status === QUEUE_STATUS.CONSULTATION
+  ).length;
   const waiting = items.filter((item) => item.status === QUEUE_STATUS.WAITING).length;
   const done = items.filter((item) => item.status === QUEUE_STATUS.DONE).length;
   const totalToday = items.length;
@@ -86,7 +123,16 @@ const getTodayQueueItems = async (user) => {
         s.id AS student_id,
         s.name AS student_name,
         CASE
-          WHEN ? IN ('ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'RECEPTION') THEN TRUE
+          WHEN ? = 'RECEPTION' THEN TRUE
+          WHEN ? = 'ADMIN' THEN FALSE
+          WHEN EXISTS (
+            SELECT 1
+            FROM patient_assignments pa_view
+            WHERE pa_view.patient_id = q.patient_id
+              AND pa_view.user_id = ?
+              AND pa_view.assignment_role = ?
+              AND pa_view.active = TRUE
+          ) THEN TRUE
           ELSE FALSE
         END AS can_update
       FROM queue q
@@ -96,13 +142,17 @@ const getTodayQueueItems = async (user) => {
         AND p.deleted_at IS NULL
         ${filter.whereClause}
       ORDER BY
-        FIELD(q.status, ?, ?, ?),
+        FIELD(q.status, ?, ?, ?, ?),
         q.arrival_time ASC
     `,
     [
       user.role,
+      user.role,
+      user.id,
+      user.role,
       ...filter.params,
       QUEUE_STATUS.TREATMENT,
+      QUEUE_STATUS.CONSULTATION,
       QUEUE_STATUS.WAITING,
       QUEUE_STATUS.DONE
     ]
@@ -164,7 +214,7 @@ const queueController = {
   getAvailablePatients: async (req, res) => {
     try {
       if (!canAddQueuePatient(req.user?.role)) {
-        return buildForbiddenResponse(res, 'Your role cannot add patients to the clinic queue');
+        return buildForbiddenResponse(res, 'Only receptionists can add patients to the clinic queue');
       }
 
       const patients = await query(
@@ -177,7 +227,7 @@ const queueController = {
               FROM queue q
               WHERE q.patient_id = p.id
                 AND DATE(q.arrival_time) = CURDATE()
-                AND q.status IN (?, ?)
+                AND q.status IN (?, ?, ?)
             )
           ORDER BY p.first_name ASC, p.last_name ASC, p.patient_code ASC
         `,
@@ -194,7 +244,7 @@ const queueController = {
   registerPatient: async (req, res) => {
     try {
       if (!canAddQueuePatient(req.user?.role)) {
-        return buildForbiddenResponse(res, 'Your role cannot add patients to the clinic queue');
+        return buildForbiddenResponse(res, 'Only receptionists can add patients to the clinic queue');
       }
 
       const { patient_id, status, student_id, bay } = req.body;
@@ -214,7 +264,7 @@ const queueController = {
           FROM queue
           WHERE patient_id = ?
             AND DATE(arrival_time) = CURDATE()
-            AND status IN (?, ?)
+            AND status IN (?, ?, ?)
           LIMIT 1
         `,
         [patient_id, ...ACTIVE_QUEUE_STATUSES]
@@ -227,7 +277,7 @@ const queueController = {
         });
       }
 
-      const startTimeSql = queueStatus === QUEUE_STATUS.TREATMENT
+      const startTimeSql = [QUEUE_STATUS.CONSULTATION, QUEUE_STATUS.TREATMENT].includes(queueStatus)
         ? 'NOW()'
         : 'NULL';
       const completionTimeSql = queueStatus === QUEUE_STATUS.DONE ? 'NOW()' : 'NULL';
@@ -274,7 +324,7 @@ const queueController = {
       if (!allowed) {
         return buildForbiddenResponse(
           res,
-          'Your role cannot update clinic queue status'
+          'Only receptionists or the assigned surgeon, orthodontist, or student can update this queue entry'
         );
       }
 
@@ -284,7 +334,7 @@ const queueController = {
           SET
             status = ?,
             start_time = CASE
-              WHEN ? = ? AND start_time IS NULL THEN NOW()
+              WHEN ? IN (?, ?) AND start_time IS NULL THEN NOW()
               WHEN ? = ? THEN NULL
               ELSE start_time
             END,
@@ -297,6 +347,7 @@ const queueController = {
         [
           status,
           status,
+          QUEUE_STATUS.CONSULTATION,
           QUEUE_STATUS.TREATMENT,
           status,
           QUEUE_STATUS.WAITING,
@@ -316,7 +367,7 @@ const queueController = {
   removeQueueEntry: async (req, res) => {
     try {
       if (!canRemoveQueuePatient(req.user?.role)) {
-        return buildForbiddenResponse(res, 'Your role cannot remove patients from the clinic queue');
+        return buildForbiddenResponse(res, 'Only receptionists can remove patients from the clinic queue');
       }
 
       const affectedRows = await remove('queue', { id: req.params.id }, false);

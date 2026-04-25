@@ -421,25 +421,21 @@ const ensureAccessControlSchema = async () => {
     `);
     const queueStatusColumnType = queueStatusColumns[0]?.COLUMN_TYPE || '';
 
-    if (
-      queueStatusColumnType &&
-      (!queueStatusColumnType.includes('In waiting room') || queueStatusColumnType.includes('under consultation'))
-    ) {
+    if (queueStatusColumnType && !queueStatusColumnType.includes('In waiting room')) {
       await query(`ALTER TABLE queue MODIFY COLUMN status VARCHAR(64) NULL DEFAULT 'In waiting room'`);
       await query(`
         UPDATE queue
         SET status = CASE status
           WHEN 'WAITING' THEN 'In waiting room'
-          WHEN 'PREPARATION' THEN 'under treatment'
+          WHEN 'PREPARATION' THEN 'under consultation'
           WHEN 'IN_TREATMENT' THEN 'under treatment'
           WHEN 'COMPLETED' THEN 'Treatments are done / Done'
-          WHEN 'under consultation' THEN 'under treatment'
           ELSE status
         END
       `);
       await query(`
         ALTER TABLE queue
-        MODIFY COLUMN status ENUM('In waiting room', 'under treatment', 'Treatments are done / Done')
+        MODIFY COLUMN status ENUM('In waiting room', 'under consultation', 'under treatment', 'Treatments are done / Done')
         DEFAULT 'In waiting room'
       `);
     }

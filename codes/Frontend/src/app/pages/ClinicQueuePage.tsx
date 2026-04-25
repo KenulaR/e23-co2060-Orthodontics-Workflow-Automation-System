@@ -6,19 +6,17 @@ import { apiService } from '../services/api';
 
 const QUEUE_STATUS_OPTIONS = [
   { value: 'In waiting room', label: 'In waiting room' },
+  { value: 'under consultation', label: 'Under consultation' },
   { value: 'under treatment', label: 'Under treatment' },
   { value: 'Treatments are done / Done', label: 'Done' },
 ];
 
-const QUEUE_READ_ROLES = ['ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'NURSE', 'STUDENT', 'RECEPTION'];
-const QUEUE_MUTATE_ROLES = ['ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'RECEPTION'];
-
 export function ClinicQueuePage() {
   const { user } = useAuth();
   const currentUserRole = user?.role?.toUpperCase() || '';
-  const canReadQueue = QUEUE_READ_ROLES.includes(currentUserRole);
-  const canAddPatient = QUEUE_MUTATE_ROLES.includes(currentUserRole);
-  const canAutoStartTreatment = ['DENTAL_SURGEON', 'ORTHODONTIST'].includes(currentUserRole);
+  const canReadQueue = ['RECEPTION', 'ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(currentUserRole);
+  const canAddPatient = currentUserRole === 'RECEPTION';
+  const canAutoStartConsultation = ['DENTAL_SURGEON', 'ORTHODONTIST', 'STUDENT'].includes(currentUserRole);
 
   const [queueData, setQueueData] = useState<any[]>([]);
   const [patientsList, setPatientsList] = useState<any[]>([]);
@@ -139,8 +137,8 @@ export function ClinicQueuePage() {
   };
 
   const handleDoctorClick = (item: any) => {
-    if (canAutoStartTreatment && item.status === 'In waiting room' && item.can_update) {
-      updatePatientStatus(item.queue_id, 'under treatment');
+    if (canAutoStartConsultation && item.status === 'In waiting room' && item.can_update) {
+      updatePatientStatus(item.queue_id, 'under consultation');
     }
   };
 
@@ -152,7 +150,7 @@ export function ClinicQueuePage() {
   });
 
   if (isLoading) return <div className="flex items-center justify-center h-64 font-medium text-slate-500">Loading Clinic Live...</div>;
-  const isDoctor = canAutoStartTreatment;
+  const isDoctor = canAutoStartConsultation;
 
   return (
     <div className="space-y-6">
@@ -212,7 +210,7 @@ export function ClinicQueuePage() {
                     {item.patient_name}
                     {isDoctor && item.status === 'In waiting room' && item.can_update && (
                       <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                        Click to start treatment
+                        Click to begin consultation
                       </span>
                     )}
                   </h4>
@@ -230,6 +228,7 @@ export function ClinicQueuePage() {
                   onChange={(e) => updatePatientStatus(item.queue_id, e.target.value)}
                   className={`border-none rounded-full px-4 py-2 text-sm font-semibold outline-none ring-1 ring-inset 
                     ${item.status === 'In waiting room'           ? 'bg-yellow-50 text-yellow-700 ring-yellow-200' : ''}
+                    ${item.status === 'under consultation'        ? 'bg-purple-50 text-purple-700 ring-purple-200' : ''}
                     ${item.status === 'under treatment'           ? 'bg-blue-50   text-blue-700   ring-blue-200'   : ''}
                     ${item.status === 'Treatments are done / Done'? 'bg-green-50  text-green-700  ring-green-200'  : ''}
                     ${item.can_update ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}

@@ -60,7 +60,7 @@ export function DashboardPage() {
     };
 
     try {
-      const canReadQueue = ['ADMIN', 'RECEPTION', 'ORTHODONTIST', 'DENTAL_SURGEON', 'NURSE', 'STUDENT'].includes(user?.role || '');
+      const canReadQueue = ['ADMIN', 'RECEPTION', 'ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(user?.role || '');
       const canReadCases = ['ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(user?.role || '');
       const [p, vt, vs, q, c, i, admin] = await Promise.all([
         safe<any>(apiService.patients.getStats()),
