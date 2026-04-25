@@ -284,7 +284,7 @@ CREATE TABLE queue (
     provider_id INT NULL,
     student_id INT NULL,
     bay VARCHAR(20),
-    status ENUM('In waiting room', 'under consultation', 'under treatment', 'Treatments are done / Done') DEFAULT 'In waiting room',
+    status ENUM('In waiting room', 'under treatment', 'Treatments are done / Done') DEFAULT 'In waiting room',
     priority ENUM('LOW', 'NORMAL', 'HIGH', 'URGENT') DEFAULT 'NORMAL',
     procedure_type VARCHAR(255),
     arrival_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

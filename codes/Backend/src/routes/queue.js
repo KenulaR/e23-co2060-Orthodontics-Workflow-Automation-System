@@ -12,21 +12,21 @@ router.get('/stats', queueController.getQueueStats);
 router.get('/', queueController.getClinicBoard);
 router.post(
   '/',
-  authorizeRoles('RECEPTION'),
+  authorizeRoles('ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'RECEPTION'),
   validate(schemas.createQueue),
   queueController.registerPatient
 );
 
 router.put(
   '/:id/status',
-  authorizeRoles('RECEPTION', 'DENTAL_SURGEON', 'ORTHODONTIST', 'STUDENT'),
+  authorizeRoles('ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'RECEPTION'),
   validate(schemas.updateQueueStatus),
   queueController.updateQueueStatus
 );
 
 router.delete(
   '/:id',
-  authorizeRoles('RECEPTION'),
+  authorizeRoles('ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'RECEPTION'),
   queueController.removeQueueEntry
 );
 
