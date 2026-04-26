@@ -35,6 +35,26 @@ type TabConfig = {
   canView: (role?: string) => boolean;
 };
 
+const formatSexLabel = (value?: string | null) => {
+  if (!value) return '-';
+
+  switch (String(value).trim().toUpperCase()) {
+    case 'M':
+    case 'MALE':
+      return 'Male';
+    case 'F':
+    case 'FEMALE':
+      return 'Female';
+    case 'O':
+    case 'OTHER':
+      return 'Other';
+    default:
+      return String(value)
+        .toLowerCase()
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+};
+
 export function PatientProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -59,10 +79,11 @@ export function PatientProfilePage() {
     setError(null);
     try {
       const patientResponse = await apiService.patients.getById(patientId);
+      const shouldLoadHistory = canReadPatientHistory(user?.role);
       const [visitResponse, noteResponse, historyResponse] = await Promise.allSettled([
         apiService.visits.getPatientVisits(patientId, { page: 1, limit: 100 }),
         apiService.clinicalNotes.getPatientNotes(patientId, { page: 1, limit: 100 }),
-        apiService.patients.getHistory(patientId),
+        shouldLoadHistory ? apiService.patients.getHistory(patientId) : Promise.resolve({ success: true, data: null }),
       ]);
 
       const payload = patientResponse.data || {};
@@ -95,7 +116,7 @@ export function PatientProfilePage() {
 
   useEffect(() => {
     loadPatient();
-  }, [patientId]);
+  }, [patientId, user?.role]);
 
   const tabs = useMemo<TabConfig[]>(() => ([
     { id: 'overview', label: 'Overview', icon: User, canView: () => true },
@@ -173,7 +194,7 @@ export function PatientProfilePage() {
             <Badge variant="blue">MRN: {patient.patient_code}</Badge>
             <Badge variant={patient.status === 'ACTIVE' ? 'success' : 'neutral'}>{patient.status}</Badge>
           </div>
-          <p className="text-gray-500 text-sm">Born {String(patient.date_of_birth).slice(0, 10)} ({patient.age ?? '-'}y) • {patient.gender}</p>
+          <p className="text-gray-500 text-sm">Born {String(patient.date_of_birth).slice(0, 10)} ({patient.age ?? '-'}y) • {formatSexLabel(patient.gender)}</p>
         </div>
       </div>
 
@@ -628,7 +649,7 @@ function HistoryTab({
           <div><span className="font-semibold text-gray-600">Age:</span> {auto?.age ?? '-'}</div>
           <div><span className="font-semibold text-gray-600">Birthday:</span> {auto?.birthday || '-'}</div>
           <div><span className="font-semibold text-gray-600">Address:</span> {auto?.address || '-'}</div>
-          <div><span className="font-semibold text-gray-600">Sex:</span> {auto?.sex || '-'}</div>
+          <div><span className="font-semibold text-gray-600">Sex:</span> {formatSexLabel(auto?.sex)}</div>
           <div><span className="font-semibold text-gray-600">Telephone No:</span> {auto?.telephone || '-'}</div>
           <div><span className="font-semibold text-gray-600">Province:</span> {auto?.province || '-'}</div>
           <div><span className="font-semibold text-gray-600">Date of Examination:</span> {auto?.date_of_examination || '-'}</div>

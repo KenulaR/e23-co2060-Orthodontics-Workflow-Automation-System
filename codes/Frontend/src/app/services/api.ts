@@ -63,16 +63,46 @@ class ApiClient {
   private baseURL: string;
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
+  private refreshPromise: Promise<boolean> | null = null;
 
   constructor() {
     this.baseURL = API_CONFIG.BASE_URL;
     this.loadTokensFromStorage();
   }
 
+  private parseJwtPayload(token: string | null): Record<string, any> | null {
+    if (!token) return null;
+
+    try {
+      const [, payload] = token.split('.');
+      if (!payload) return null;
+      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+      return JSON.parse(atob(padded));
+    } catch {
+      return null;
+    }
+  }
+
+  private isJwtExpired(token: string | null, skewSeconds = 15): boolean {
+    const payload = this.parseJwtPayload(token);
+    const exp = Number(payload?.exp || 0);
+    if (!exp) return false;
+    return exp <= Math.floor(Date.now() / 1000) + skewSeconds;
+  }
+
   // Token management
   private loadTokensFromStorage() {
-    this.accessToken = localStorage.getItem('accessToken');
-    this.refreshToken = localStorage.getItem('refreshToken');
+    const storedAccessToken = localStorage.getItem('accessToken');
+    const storedRefreshToken = localStorage.getItem('refreshToken');
+
+    if (this.isJwtExpired(storedRefreshToken)) {
+      this.clearTokensFromStorage();
+      return;
+    }
+
+    this.accessToken = this.isJwtExpired(storedAccessToken) ? null : storedAccessToken;
+    this.refreshToken = storedRefreshToken;
   }
 
   private saveTokensToStorage(accessToken: string, refreshToken: string) {
@@ -87,6 +117,17 @@ class ApiClient {
     this.refreshToken = null;
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
+  }
+
+  private shouldAttemptTokenRefresh(endpoint: string): boolean {
+    const authEndpointsWithoutRefresh = new Set<string>([
+      API_ENDPOINTS.AUTH.LOGIN,
+      API_ENDPOINTS.AUTH.GOOGLE,
+      API_ENDPOINTS.AUTH.REFRESH,
+      API_ENDPOINTS.AUTH.LOGOUT,
+    ]);
+
+    return Boolean(this.refreshToken) && !authEndpointsWithoutRefresh.has(endpoint);
   }
 
   // Request helper
@@ -109,6 +150,17 @@ class ApiClient {
       config.cache = 'no-store';
     }
 
+    if (!this.accessToken && this.shouldAttemptTokenRefresh(endpoint)) {
+      const refreshSuccess = await this.refreshAccessToken();
+      if (!refreshSuccess) {
+        this.clearTokensFromStorage();
+        if (window.location.pathname !== '/login') {
+          window.location.assign('/login');
+        }
+        throw new Error(ERROR_MESSAGES.UNAUTHORIZED);
+      }
+    }
+
     // Add auth header if token exists
     if (this.accessToken) {
       config.headers = {
@@ -122,7 +174,7 @@ class ApiClient {
       const data = await response.json();
 
       // Handle 401 Unauthorized - try refresh token
-      if (response.status === HTTP_STATUS.UNAUTHORIZED && this.refreshToken) {
+      if (response.status === HTTP_STATUS.UNAUTHORIZED && this.shouldAttemptTokenRefresh(endpoint)) {
         const refreshSuccess = await this.refreshAccessToken();
         if (refreshSuccess) {
           // Retry original request with new token
@@ -135,7 +187,9 @@ class ApiClient {
         } else {
           // Refresh failed, clear tokens and redirect to login
           this.clearTokensFromStorage();
-          window.location.href = '/login';
+          if (window.location.pathname !== '/login') {
+            window.location.assign('/login');
+          }
           throw new Error(ERROR_MESSAGES.UNAUTHORIZED);
         }
       }
@@ -154,6 +208,19 @@ class ApiClient {
 
   // Refresh access token
   private async refreshAccessToken(): Promise<boolean> {
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this.performRefreshAccessToken();
+    try {
+      return await this.refreshPromise;
+    } finally {
+      this.refreshPromise = null;
+    }
+  }
+
+  private async performRefreshAccessToken(): Promise<boolean> {
     try {
       const response = await fetch(`${this.baseURL}${API_ENDPOINTS.AUTH.REFRESH}`, {
         method: 'POST',
@@ -178,6 +245,7 @@ class ApiClient {
     } catch (error) {
       console.error('Token refresh failed:', error);
     }
+    this.clearTokensFromStorage();
     return false;
   }
 
@@ -757,6 +825,9 @@ export const apiService = {
   queue: {
     getList: () => 
       apiClient.get<any>(API_ENDPOINTS.QUEUE.LIST),
+
+    getAvailablePatients: () =>
+      apiClient.get<any[]>(API_ENDPOINTS.QUEUE.PATIENTS),
 
     getStats: () =>
       apiClient.get<any>(API_ENDPOINTS.QUEUE.STATS),

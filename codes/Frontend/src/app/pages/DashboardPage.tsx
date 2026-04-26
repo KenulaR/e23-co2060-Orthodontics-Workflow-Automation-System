@@ -60,12 +60,14 @@ export function DashboardPage() {
     };
 
     try {
+      const canReadQueue = ['ADMIN', 'RECEPTION', 'ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(user?.role || '');
+      const canReadCases = ['ADMIN', 'ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT'].includes(user?.role || '');
       const [p, vt, vs, q, c, i, admin] = await Promise.all([
         safe<any>(apiService.patients.getStats()),
         safe<any>(apiService.visits.getToday()),
         safe<any>(apiService.visits.getStats()),
-        safe<any>(apiService.queue.getList()),
-        safe<any>(apiService.cases.getStats()),
+        canReadQueue ? safe<any>(apiService.queue.getStats()) : Promise.resolve(null),
+        canReadCases ? safe<any>(apiService.cases.getStats()) : Promise.resolve(null),
         safe<any>(apiService.inventory.getStats()),
         user?.role === 'ADMIN' ? safe<any>(apiService.reports.dashboard('month')) : Promise.resolve(null),
       ]);

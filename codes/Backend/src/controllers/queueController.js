@@ -1,107 +1,386 @@
-// codes/Backend/src/controllers/queueController.js
-const pool = require('../config/database');
+const { query, remove } = require('../config/database');
+
+const QUEUE_STATUS = {
+  WAITING: 'In waiting room',
+  CONSULTATION: 'under consultation',
+  TREATMENT: 'under treatment',
+  DONE: 'Treatments are done / Done'
+};
+
+const ACTIVE_QUEUE_STATUSES = [
+  QUEUE_STATUS.WAITING,
+  QUEUE_STATUS.CONSULTATION,
+  QUEUE_STATUS.TREATMENT
+];
+
+const ASSIGNMENT_SCOPED_QUEUE_ROLES = new Set(['ORTHODONTIST', 'DENTAL_SURGEON', 'STUDENT']);
+
+const canReadQueue = (role) => ['RECEPTION', 'ADMIN', ...ASSIGNMENT_SCOPED_QUEUE_ROLES].includes(role);
+
+const canAddQueuePatient = (role) => role === 'RECEPTION';
+
+const canRemoveQueuePatient = (role) => role === 'RECEPTION';
+
+const buildForbiddenResponse = (res, message = 'You do not have access to the clinic queue') =>
+  res.status(403).json({ success: false, message });
+
+const getQueueReadScope = (user) => {
+  if (!user) return { allowed: false };
+  if (!canReadQueue(user.role)) return { allowed: false };
+
+  if (user.role === 'RECEPTION' || user.role === 'ADMIN') {
+    return { allowed: true, assignmentScoped: false };
+  }
+
+  return { allowed: true, assignmentScoped: true };
+};
+
+const buildQueueFilter = (user) => {
+  const scope = getQueueReadScope(user);
+  if (!scope.allowed) {
+    return null;
+  }
+
+  if (!scope.assignmentScoped) {
+    return {
+      whereClause: '',
+      params: []
+    };
+  }
+
+  return {
+    whereClause: `
+      AND EXISTS (
+        SELECT 1
+        FROM patient_assignments pa
+        WHERE pa.patient_id = q.patient_id
+          AND pa.user_id = ?
+          AND pa.assignment_role = ?
+          AND pa.active = TRUE
+      )
+    `,
+    params: [user.id, user.role]
+  };
+};
+
+const canUpdateQueueEntry = async (user, queueEntry) => {
+  if (!user || !queueEntry) return false;
+  if (user.role === 'RECEPTION') return true;
+  if (!ASSIGNMENT_SCOPED_QUEUE_ROLES.has(user.role)) return false;
+
+  const assignmentRows = await query(
+    `SELECT 1
+     FROM patient_assignments
+     WHERE patient_id = ?
+       AND user_id = ?
+       AND assignment_role = ?
+       AND active = TRUE
+     LIMIT 1`,
+    [queueEntry.patient_id, user.id, user.role]
+  );
+
+  return assignmentRows.length > 0;
+};
+
+const buildStats = (items) => {
+  const inTreatment = items.filter(
+    (item) => item.status === QUEUE_STATUS.TREATMENT || item.status === QUEUE_STATUS.CONSULTATION
+  ).length;
+  const waiting = items.filter((item) => item.status === QUEUE_STATUS.WAITING).length;
+  const done = items.filter((item) => item.status === QUEUE_STATUS.DONE).length;
+  const totalToday = items.length;
+
+  return {
+    inTreatment,
+    waiting,
+    done,
+    totalToday,
+    statistics: {
+      in_treatment_count: inTreatment,
+      waiting_count: waiting,
+      completed_count: done,
+      total_today: totalToday
+    }
+  };
+};
+
+const getTodayQueueItems = async (user) => {
+  const filter = buildQueueFilter(user);
+  if (!filter) return null;
+
+  return query(
+    `
+      SELECT
+        q.id AS queue_id,
+        q.status,
+        q.bay,
+        q.arrival_time,
+        q.start_time,
+        q.completion_time,
+        p.id AS patient_id,
+        p.patient_code,
+        CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
+        s.id AS student_id,
+        s.name AS student_name,
+        CASE
+          WHEN ? = 'RECEPTION' THEN TRUE
+          WHEN ? = 'ADMIN' THEN FALSE
+          WHEN EXISTS (
+            SELECT 1
+            FROM patient_assignments pa_view
+            WHERE pa_view.patient_id = q.patient_id
+              AND pa_view.user_id = ?
+              AND pa_view.assignment_role = ?
+              AND pa_view.active = TRUE
+          ) THEN TRUE
+          ELSE FALSE
+        END AS can_update
+      FROM queue q
+      JOIN patients p ON q.patient_id = p.id
+      LEFT JOIN users s ON q.student_id = s.id
+      WHERE DATE(q.arrival_time) = CURDATE()
+        AND p.deleted_at IS NULL
+        ${filter.whereClause}
+      ORDER BY
+        FIELD(q.status, ?, ?, ?, ?),
+        q.arrival_time ASC
+    `,
+    [
+      user.role,
+      user.role,
+      user.id,
+      user.role,
+      ...filter.params,
+      QUEUE_STATUS.TREATMENT,
+      QUEUE_STATUS.CONSULTATION,
+      QUEUE_STATUS.WAITING,
+      QUEUE_STATUS.DONE
+    ]
+  );
+};
 
 const queueController = {
-    // 1. Fetch the Queue AND the Stats
-    getClinicBoard: async (req, res) => {
-        try {
-            const [queueItems] = await pool.query(`
-                SELECT 
-                    q.id AS queue_id,
-                    q.status,
-                    q.bay,
-                    q.arrival_time,
-                    p.id AS patient_id,
-                    CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
-                    s.id AS student_id,
-                    s.name AS student_name
-                FROM queue q
-                JOIN patients p ON q.patient_id = p.id
-                LEFT JOIN users s ON q.student_id = s.id
-                ORDER BY 
-                    FIELD(q.status, 'under treatment', 'under consultation', 'In waiting room', 'Treatments are done / Done'),
-                    q.arrival_time ASC
-            `);
+  getClinicBoard: async (req, res) => {
+    try {
+      const items = await getTodayQueueItems(req.user);
+      if (!items) {
+        return buildForbiddenResponse(res);
+      }
+      const stats = buildStats(items);
 
-            const stats = {
-                inTreatment: queueItems.filter(item => 
-                    item.status === 'under treatment' || item.status === 'under consultation'
-                ).length,
-                waiting: queueItems.filter(item => item.status === 'In waiting room').length,
-                done: queueItems.filter(item => item.status === 'Treatments are done / Done').length,
-                totalToday: queueItems.length
-            };
-            
-            res.status(200).json({ success: true, stats, data: queueItems });
-        } catch (error) {
-            console.error('Error fetching clinic board:', error);
-            res.status(500).json({ success: false, message: 'Failed to fetch queue data' });
-        }
-    },
-
-    // 2. Fetch all patients for dropdown
-    getAvailablePatients: async (req, res) => {
-        try {
-            const [patients] = await pool.query(`
-                SELECT * FROM patients ORDER BY first_name ASC
-            `);
-            res.status(200).json({ success: true, data: patients });
-        } catch (error) {
-            console.error('Error fetching patients:', error);
-            res.status(500).json({ success: false, message: 'Failed to fetch patients' });
-        }
-    },
-
-    // 3. Register a new patient
-    registerPatient: async (req, res) => {
-        try {
-            const { patient_id, status, student_id, bay } = req.body;
-
-            if (!patient_id) {
-                return res.status(400).json({ success: false, message: 'Patient ID is required' });
-            }
-
-            const [result] = await pool.query(
-                `INSERT INTO queue (patient_id, status, student_id, bay, arrival_time) 
-                 VALUES (?, ?, ?, ?, NOW())`,
-                [patient_id, status || 'In waiting room', student_id || null, bay || null]
-            );
-
-            res.status(201).json({ 
-                success: true, 
-                message: 'Patient added to queue', 
-                queue_id: result.insertId 
-            });
-        } catch (error) {
-            console.error('Error registering patient:', error);
-            res.status(500).json({ success: false, message: 'Failed to register patient to queue' });
-        }
-    },
-
-    // 4. Update status
-    updateQueueStatus: async (req, res) => {
-        try {
-            const queueId = req.params.id;
-            const { status } = req.body;
-
-            const [result] = await pool.query(
-                'UPDATE queue SET status = ? WHERE id = ?',
-                [status, queueId]
-            );
-
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ success: false, message: 'Queue item not found' });
-            }
-
-            res.status(200).json({ 
-                success: true, 
-                message: `Status updated to ${status}` 
-            });
-        } catch (error) {
-            console.error('Error updating status:', error);
-            res.status(500).json({ success: false, message: 'Failed to update status' });
-        }
+      res.status(200).json({
+        success: true,
+        stats: {
+          inTreatment: stats.inTreatment,
+          waiting: stats.waiting,
+          done: stats.done,
+          totalToday: stats.totalToday
+        },
+        statistics: stats.statistics,
+        data: items
+      });
+    } catch (error) {
+      console.error('Error fetching clinic board:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch queue data' });
     }
+  },
+
+  getQueueStats: async (req, res) => {
+    try {
+      const items = await getTodayQueueItems(req.user);
+      if (!items) {
+        return buildForbiddenResponse(res);
+      }
+      const stats = buildStats(items);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          stats: {
+            inTreatment: stats.inTreatment,
+            waiting: stats.waiting,
+            done: stats.done,
+            totalToday: stats.totalToday
+          },
+          statistics: stats.statistics
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching queue stats:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch queue statistics' });
+    }
+  },
+
+  getAvailablePatients: async (req, res) => {
+    try {
+      if (!canAddQueuePatient(req.user?.role)) {
+        return buildForbiddenResponse(res, 'Only receptionists can add patients to the clinic queue');
+      }
+
+      const patients = await query(
+        `
+          SELECT p.id, p.patient_code, p.first_name, p.last_name, p.status
+          FROM patients p
+          WHERE p.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM queue q
+              WHERE q.patient_id = p.id
+                AND DATE(q.arrival_time) = CURDATE()
+                AND q.status IN (?, ?, ?)
+            )
+          ORDER BY p.first_name ASC, p.last_name ASC, p.patient_code ASC
+        `,
+        ACTIVE_QUEUE_STATUSES
+      );
+
+      res.status(200).json({ success: true, data: patients });
+    } catch (error) {
+      console.error('Error fetching patients:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch patients' });
+    }
+  },
+
+  registerPatient: async (req, res) => {
+    try {
+      if (!canAddQueuePatient(req.user?.role)) {
+        return buildForbiddenResponse(res, 'Only receptionists can add patients to the clinic queue');
+      }
+
+      const { patient_id, status, student_id, bay } = req.body;
+      const queueStatus = status || QUEUE_STATUS.WAITING;
+
+      const patients = await query(
+        'SELECT id FROM patients WHERE id = ? AND deleted_at IS NULL LIMIT 1',
+        [patient_id]
+      );
+      if (!patients.length) {
+        return res.status(404).json({ success: false, message: 'Patient not found' });
+      }
+
+      const existingActiveEntries = await query(
+        `
+          SELECT id, status
+          FROM queue
+          WHERE patient_id = ?
+            AND DATE(arrival_time) = CURDATE()
+            AND status IN (?, ?, ?)
+          LIMIT 1
+        `,
+        [patient_id, ...ACTIVE_QUEUE_STATUSES]
+      );
+
+      if (existingActiveEntries.length) {
+        return res.status(409).json({
+          success: false,
+          message: 'Patient is already in today\'s active queue'
+        });
+      }
+
+      const startTimeSql = [QUEUE_STATUS.CONSULTATION, QUEUE_STATUS.TREATMENT].includes(queueStatus)
+        ? 'NOW()'
+        : 'NULL';
+      const completionTimeSql = queueStatus === QUEUE_STATUS.DONE ? 'NOW()' : 'NULL';
+
+      const result = await query(
+        `
+          INSERT INTO queue
+            (patient_id, status, student_id, bay, arrival_time, start_time, completion_time)
+          VALUES
+            (?, ?, ?, ?, NOW(), ${startTimeSql}, ${completionTimeSql})
+        `,
+        [patient_id, queueStatus, student_id || null, bay || null]
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Patient added to queue',
+        queue_id: result.insertId
+      });
+    } catch (error) {
+      console.error('Error registering patient:', error);
+      res.status(500).json({ success: false, message: 'Failed to register patient' });
+    }
+  },
+
+  updateQueueStatus: async (req, res) => {
+    try {
+      const queueId = req.params.id;
+      const { status } = req.body;
+
+      const existingEntries = await query(
+        `SELECT id, patient_id, status
+         FROM queue
+         WHERE id = ?
+         LIMIT 1`,
+        [queueId]
+      );
+      if (!existingEntries.length) {
+        return res.status(404).json({ success: false, message: 'Queue entry not found' });
+      }
+
+      const [queueEntry] = existingEntries;
+      const allowed = await canUpdateQueueEntry(req.user, queueEntry);
+      if (!allowed) {
+        return buildForbiddenResponse(
+          res,
+          'Only receptionists or the assigned surgeon, orthodontist, or student can update this queue entry'
+        );
+      }
+
+      await query(
+        `
+          UPDATE queue
+          SET
+            status = ?,
+            start_time = CASE
+              WHEN ? IN (?, ?) AND start_time IS NULL THEN NOW()
+              WHEN ? = ? THEN NULL
+              ELSE start_time
+            END,
+            completion_time = CASE
+              WHEN ? = ? THEN NOW()
+              ELSE NULL
+            END
+          WHERE id = ?
+        `,
+        [
+          status,
+          status,
+          QUEUE_STATUS.CONSULTATION,
+          QUEUE_STATUS.TREATMENT,
+          status,
+          QUEUE_STATUS.WAITING,
+          status,
+          QUEUE_STATUS.DONE,
+          queueId
+        ]
+      );
+
+      res.status(200).json({ success: true, message: `Status updated to ${status}` });
+    } catch (error) {
+      console.error('Error updating status:', error);
+      res.status(500).json({ success: false, message: 'Failed to update status' });
+    }
+  },
+
+  removeQueueEntry: async (req, res) => {
+    try {
+      if (!canRemoveQueuePatient(req.user?.role)) {
+        return buildForbiddenResponse(res, 'Only receptionists can remove patients from the clinic queue');
+      }
+
+      const affectedRows = await remove('queue', { id: req.params.id }, false);
+      if (!affectedRows) {
+        return res.status(404).json({ success: false, message: 'Queue entry not found' });
+      }
+
+      res.status(200).json({ success: true, message: 'Queue entry removed' });
+    } catch (error) {
+      console.error('Error removing queue entry:', error);
+      res.status(500).json({ success: false, message: 'Failed to remove queue entry' });
+    }
+  }
 };
 
 module.exports = queueController;
